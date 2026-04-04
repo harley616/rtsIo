@@ -1,0 +1,10 @@
+{
+  "name": "rtsio-relay",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

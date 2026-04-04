@@ -1,93 +1,141 @@
 import * as THREE from "three"
 import { Scene } from "./scene"
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader"
-import { ModelsDict } from "./types"
+import { ModelsDict } from "./types/models"
+import { Game } from "./engine/game"
+import { Command } from "./engine/types"
+import { LockstepManager } from "./engine/lockstep"
+
+const TICK_MS = 10
+const DT = 0.05
+const RELAY_URL = "ws://localhost:3001"
 
 InitScene()
 
-const urlSearchParams = new URLSearchParams(window.location.search)
-const port = urlSearchParams.get("portNumber")
-const host = "10.0.0.100"
-console.log("HELLP me tYpeScrIpt")
-
 async function InitScene() {
 	const models = await loadModels()
-	const scene = new Scene("threejs-container", models)
+	const params = new URLSearchParams(window.location.search)
+	const mode = params.get("mode") // "create", "join", or null (offline)
+	const joinCode = params.get("code")
+
+	// Shared sendCommand — wired to either local queue or lockstep
+	let sendCommand: (cmd: Command) => void
+
+	const scene = new Scene("threejs-container", models, (cmd) => sendCommand(cmd))
 	scene.startAnimationLoop()
 
-	// const socket = new WebSocket("ws://10.0.0.43:8080/ws")
-	const socket = new WebSocket(`ws://${host}:8080/${port}`)
+	const playerNumElem = document.getElementById("player-number")
+	const goldDisplay = document.getElementById("gold")
+	const woodDisplay = document.getElementById("wood")
+	const stoneDisplay = document.getElementById("stone")
+	const statusElem = document.getElementById("player-label")
 
-	window.addEventListener("keydown", (event) => {
-		if (event.key.toLowerCase() === "t") {
-			const command = prompt("Enter terminal command:")
-			console.log("Sending command: " + command)
-			const messageMap = {
-				messageType: "command",
-				data: {
-					command: command,
-				},
-			}
-			socket.send(JSON.stringify(messageMap))
-			console.log(JSON.stringify(messageMap))
+	function updateResourceDisplay(game: Game, playerId: number) {
+		const player = game.players.get(playerId)
+		if (player) {
+			if (goldDisplay) goldDisplay.innerText = `${Math.floor(player.gold)}`
+			if (stoneDisplay) stoneDisplay.innerText = `${Math.floor(player.stone)}`
+			if (woodDisplay) woodDisplay.innerText = `${Math.floor(player.wood)}`
 		}
-	})
+	}
 
-	socket.addEventListener("open", (event: Event) => {
-		console.log("Connected to server", event)
-	})
+	if (mode === "create" || mode === "join") {
+		// --- Multiplayer (lockstep) ---
+		const lockstep = new LockstepManager({
+			onStateChange: (state) => {
+				if (statusElem) {
+					switch (state) {
+						case "connecting":
+							statusElem.textContent = "Connecting..."
+							break
+						case "waiting":
+							statusElem.textContent = "Waiting for opponent..."
+							break
+						case "playing":
+							statusElem.innerHTML = `Player <span id="player-number">${lockstep.playerId}</span>`
+							break
+						case "disconnected":
+							statusElem.textContent = "Disconnected"
+							break
+					}
+				}
+			},
+			onGameCreated: (code) => {
+				if (statusElem) {
+					statusElem.textContent = `Code: ${code} — Waiting for opponent...`
+				}
+				// Update URL so the code is visible/shareable
+				const url = new URL(window.location.href)
+				url.searchParams.set("code", code)
+				window.history.replaceState({}, "", url.toString())
+			},
+			onTurnApplied: (game) => {
+				scene.syncFromEngine(game)
+				updateResourceDisplay(game, lockstep.playerId)
+			},
+		})
 
-	socket.addEventListener("error", function (event) {
-		console.error("Error connecting to server", event)
-	})
-	// UI interaction: Rotate the cube when the button is clicked
-	// ADD HOUSE BUTTON
-	const addHouseButton = document.getElementById("addHouse")
-	addHouseButton?.addEventListener("click", () => {
+		sendCommand = (cmd) => lockstep.sendCommand(cmd)
+
+		if (mode === "create") {
+			lockstep.createGame(RELAY_URL)
+		} else if (joinCode) {
+			lockstep.joinGame(RELAY_URL, joinCode)
+		}
+
+		// Set playerId once known (updates reactively via onStateChange)
+		const checkPlayerId = setInterval(() => {
+			if (lockstep.playerId > 0) {
+				scene.playerId = lockstep.playerId
+				if (playerNumElem) playerNumElem.innerText = `${lockstep.playerId}`
+				clearInterval(checkPlayerId)
+			}
+		}, 100)
+	} else {
+		// --- Offline single-player ---
+		const pendingCommands: Command[] = []
+		sendCommand = (cmd) => pendingCommands.push(cmd)
+
+		const game = Game.makeTwoPlayerGame()
+		scene.playerId = 1
+		if (playerNumElem) playerNumElem.innerText = "1"
+
+		setInterval(() => {
+			while (pendingCommands.length > 0) {
+				game.applyCommand(scene.playerId, pendingCommands.shift()!)
+			}
+			game.update(DT)
+			scene.syncFromEngine(game)
+			updateResourceDisplay(game, scene.playerId)
+		}, TICK_MS)
+	}
+
+	// --- UI Button handlers ---
+
+	document.getElementById("addHouse")?.addEventListener("click", () => {
 		scene.isBuilding = true
 		scene.currentBuildingType = "house"
 	})
-	// ADD TOWN HALL BUTTON
-	const addTownHallButton = document.getElementById("addTownHall")
-	addTownHallButton?.addEventListener("click", () => {
+
+	document.getElementById("addTownHall")?.addEventListener("click", () => {
 		scene.isBuilding = true
 		scene.currentBuildingType = "townhall"
 	})
-	// ADD BARRACKS BUTTON
-	const addBarracksButton = document.getElementById("addBarracks")
-	addBarracksButton?.addEventListener("click", () => {
+
+	document.getElementById("addBarracks")?.addEventListener("click", () => {
 		scene.isBuilding = true
 		scene.currentBuildingType = "barracks"
 	})
 
-	const addKnight = document.getElementById("addKnight")
-	addKnight?.addEventListener("click", () => {
-		console.log("Adding knight")
-		//scene.commandBuffer.push({ createKnight: { some: "knight" } })
-	})
-	// ADD BARRACKS BUTTON
-	const addWorker = document.getElementById("addWorker")
-	addWorker?.addEventListener("click", () => {
-		//scene.commandBuffer.push({ createBuilder: { some: "builder" } })
+	document.getElementById("addKnight")?.addEventListener("click", () => {
+		sendCommand({ type: "createKnight" })
 	})
 
-	const playerNumElem = document.getElementById("player-number")
-	if (!playerNumElem) {
-		throw new Error("Player number element not found")
-	}
+	document.getElementById("addWorker")?.addEventListener("click", () => {
+		sendCommand({ type: "createBuilder" })
+	})
 
-	//const goldDisplay = document.getElementById("gold")
-	//const woodDisplay = document.getElementById("wood")
-	//const stoneDisplay = document.getElementById("stone")
-	//const populationDisplay = document.getElementById("population")
-	//const playerLabel = document.getElementById("player-label")
-
-	// Handle resizing
-	// window.addEventListener("resize", () => {
-	// 	camera.aspect = window.innerWidth / window.innerHeight
-	// 	camera.updateProjectionMatrix()
-	// 	renderer.setSize(window.innerWidth, window.innerHeight)
-	// })
+	// --- Input handlers ---
 
 	window.addEventListener("mousemove", (event) => {
 		scene.mouseX = (event.clientX / window.innerWidth) * 2 - 1
@@ -114,8 +162,6 @@ async function InitScene() {
 			const maxZoom = 3.0
 			const zoomSensitivity = 0.001
 			event.preventDefault()
-
-			// Adjust zoom based on the vertical scroll amount (deltaY)
 			scene.zoom += event.deltaY * zoomSensitivity
 			scene.zoom = Math.min(maxZoom, Math.max(minZoom, scene.zoom))
 			scene.updateCamera()
@@ -126,73 +172,56 @@ async function InitScene() {
 	window.addEventListener("contextmenu", (event) => {
 		event.preventDefault()
 	})
-
-	const handleMessage = (event: MessageEvent) => {
-		// TODO: Make this use binary data
-		const message = JSON.parse(event.data)
-		console.log(message)
-		switch (message.messageType) {
-			case "playerNumber":
-				playerNumElem.innerText = `${message.data.playerNumber}`
-				break
-			case "commandResponse":
-				break
-			default:
-				console.log("Unknown message type", message.type)
-		}
-	}
-
-	socket.addEventListener("message", function (event) {
-		handleMessage(event)
-	})
 }
+
+// --- Model loading ---
 
 async function loadModels() {
 	var modelsDict: ModelsDict = {}
 	const houseModel_red = (await loadModel(
-		"public/models/buildings/house/house_red.glb"
+		"models/buildings/house/house_red.glb"
 	)) as THREE.Object3D
 	const houseModel_blue = (await loadModel(
-		"public/models/buildings/house/house_blue.glb"
+		"models/buildings/house/house_blue.glb"
 	)) as THREE.Object3D
 	const townhallModel_red = (await loadModel(
-		"public/models/buildings/townhall/townhall_red.glb"
+		"models/buildings/townhall/townhall_red.glb"
 	)) as THREE.Object3D
 	const townhallModel_blue = (await loadModel(
-		"public/models/buildings/townhall/townhall_blue.glb"
+		"models/buildings/townhall/townhall_blue.glb"
 	)) as THREE.Object3D
 	const barracksModel_red = (await loadModel(
-		"public/models/buildings/barracks/barracks_red.glb"
+		"models/buildings/barracks/barracks_red.glb"
 	)) as THREE.Object3D
 	const barracksModel_blue = (await loadModel(
-		"public/models/buildings/barracks/barracks_blue.glb"
+		"models/buildings/barracks/barracks_blue.glb"
 	)) as THREE.Object3D
 	const goldModel = (await loadModelResource(
-		"public/models/buildings/nodes/gold/gold.glb"
+		"models/buildings/nodes/gold/gold.glb"
 	)) as THREE.Object3D
 	const stoneModel = (await loadModelResource(
-		"public/models/buildings/nodes/stone/stone.glb"
+		"models/buildings/nodes/stone/stone.glb"
 	)) as THREE.Object3D
 	const wood = (await loadModelResource(
-		"public/models/buildings/nodes/wood/wood.glb"
+		"models/buildings/nodes/wood/wood.glb"
 	)) as THREE.Object3D
 	const knight_red_idle = (await loadModelResource(
-		"public/models/characters/knight_red/knight_red_idle.glb"
+		"models/characters/knight_red/knight_red_idle.glb"
 	)) as THREE.Object3D
 	const knight_blue_idle = (await loadModelResource(
-		"public/models/characters/knight_blue/knight_blue_idle.glb"
+		"models/characters/knight_blue/knight_blue_idle.glb"
 	)) as THREE.Object3D
 	const knight_red_attack = (await loadModelResource(
-		"public/models/characters/knight_red/knight_red_attack.glb"
+		"models/characters/knight_red/knight_red_attack.glb"
 	)) as THREE.Object3D
 	const knight_blue_attack = (await loadModelResource(
-		"public/models/characters/knight_blue/knight_blue_attack.glb"
+		"models/characters/knight_blue/knight_blue_attack.glb"
 	)) as THREE.Object3D
 	const worker_red = (await loadModelResource(
-		"public/models/characters/worker/worker_red.glb"
+		"models/characters/worker/worker_red.glb"
 	)) as THREE.Object3D
 	const worker_blue = (await loadModelResource(
-		"public/models/characters/worker/worker_blue.glb"
+		"models/characters/worker/worker_blue.glb"
 	)) as THREE.Object3D
 	modelsDict.house = [houseModel_blue, houseModel_red]
 	modelsDict.townhall = [townhallModel_blue, townhallModel_red]
@@ -253,7 +282,6 @@ async function loadModelResource(path: string) {
 						child.castShadow = true
 					}
 				})
-				console.log("Model loaded")
 				resolve(model)
 			},
 			undefined,

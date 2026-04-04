@@ -1,9 +1,12 @@
 import * as THREE from "three"
 import { SelectionBox } from "three/examples/jsm/interactive/SelectionBox"
 import { SelectionHelper } from "three/examples/jsm/interactive/SelectionHelper"
-import { Building } from "./building"
+import { Building } from "./structures/building"
 import { Knight, Builder } from "./guys"
-import { BuildingType } from "./types"
+import { BuildingType } from "./types/models"
+import { Game } from "./engine/game"
+import { buildingPosition } from "./engine/entities"
+import { Command, BuildingType as EngineBuildingType } from "./engine/types"
 
 interface Unit {
 	model: THREE.Object3D
@@ -12,18 +15,6 @@ interface Unit {
 }
 
 type UnitType = "knight" | "builder"
-
-interface Command {
-	moveUnit?: {
-		id: number
-		type: string
-		pos: { x: number; y: number; z: number }
-	}
-	placeBuilding?: {
-		type: string
-		pos: { x: number; z: number }
-	}
-}
 
 export class Scene {
 	keysPressed: Record<string, boolean> = {}
@@ -39,7 +30,7 @@ export class Scene {
 	mouseY: number = 0
 	modelsDict: any
 	zoom: number = 1
-	commandBuffer: Command[] = []
+	sendCommand: (cmd: Command) => void
 	container: HTMLElement | null
 	scene: THREE.Scene
 	camera: THREE.OrthographicCamera
@@ -54,7 +45,7 @@ export class Scene {
 	TEMP_townhall: Building
 	TEMP_barracks: Building
 	cubes: THREE.Mesh[] = []
-	constructor(containerId: string, models: any) {
+	constructor(containerId: string, models: any, sendCommand: (cmd: Command) => void) {
 		this.keysPressed = {}
 		this.buildings = []
 		this.playerId = -1
@@ -69,7 +60,7 @@ export class Scene {
 		this.modelsDict = models
 		this.zoom = 1
 
-		this.commandBuffer = []
+		this.sendCommand = sendCommand
 		this.container = document.getElementById(containerId)
 		if (!this.container) {
 			throw new Error(`Container with id ${containerId} not found`)
@@ -87,7 +78,7 @@ export class Scene {
 			0.1, // near
 			1000 // far
 		)
-		this.camera.position.set(200, 200, 200)
+		this.camera.position.set(50, 50, 50)
 		this.camera.lookAt(new THREE.Vector3(0, 0, 0))
 
 		this.renderer = new THREE.WebGLRenderer({ antialias: true })
@@ -318,15 +309,14 @@ export class Scene {
 		if (e.button == 2) {
 			for (const selection of this.selectedUnits) {
 				if (selection.entityId && selection.isMoveable) {
-					this.commandBuffer.push({
-						moveUnit: {
-							id: selection.entityId,
-							type: this.moveType === 0 ? "passive" : "aggressive",
-							pos: {
-								x: clickLocation?.x ?? 0 + Math.random() * 2 - 1,
-								y: 0.5,
-								z: clickLocation?.z ?? 0 + Math.random() * 2 - 1,
-							},
+					this.sendCommand({
+						type: "moveUnit",
+						entityId: selection.entityId,
+						moveType: this.moveType === 0 ? "passive" : "aggressive",
+						pos: {
+							x: clickLocation?.x ?? 0,
+							y: 0.5,
+							z: clickLocation?.z ?? 0,
 						},
 					})
 				}
@@ -335,8 +325,7 @@ export class Scene {
 		} else if (e.button == 0) {
 			this.selectedUnits = []
 
-			this.selectionBox.startPoint.set(mX, mY, 0)
-			this.helper.startPoint.set(e.clientX, e.clientY)
+			this.selectionBox.startPoint = new THREE.Vector3(mX, mY, 0)
 
 			this.helper.isDown = true
 		}
@@ -347,7 +336,7 @@ export class Scene {
 		const mY = -(e.clientY / window.innerHeight) * 2 + 1
 		if (this.helper.isDown) {
 			this.selectionBox.endPoint.set(mX, mY, 0)
-			this.helper.onSelectMove(e)
+			// this.helper.onSelectMove(e)
 			// this.selectedUnits = this.selectionBox.select()
 			// this.updateSelectedAppearances();
 		}
@@ -365,47 +354,43 @@ export class Scene {
 			const dy = mY - this.selectionBox.startPoint.y
 			const distance = Math.sqrt(dx * dx + dy * dy)
 
-			// TODO: Is this needed?
-			//this.helper.onSelectOver()
-			this.helper.isDown = false
-
 			if (distance < DRAG_THRESHOLD) {
-				// Optionally, you can do a raycast here for single object selection.
-				// For now, simply clear the selection.
 				this.selectedUnits = []
 				this.updateSelectedAppearances()
-				console.log("Click detected: no drag selection")
 			} else {
-				// Finalize the selection rectangle.
+				// Finalize the selection rectangle
 				this.selectionBox.collection = this.selectableObjects
+				const meshes = this.selectionBox.select()
 
-				this.selectedUnits = this.selectionBox.select()
+				// Deduplicate: map meshes back to their parent Unit objects
+				const seen = new Set<number>()
+				this.selectedUnits = []
+				for (const mesh of meshes) {
+					const unit = (mesh as any).unit
+					if (unit?.entityId != null && unit.isSelectable && !seen.has(unit.entityId)) {
+						seen.add(unit.entityId)
+						this.selectedUnits.push(unit)
+					}
+				}
 
 				this.helper.isDown = false
 				this.updateSelectedAppearances()
-			}
-
-			for (let i = 0; i < this.selectedUnits.length; i++) {
-				if (!this.selectedUnits[i].isSelectable) {
-					continue
-				}
 			}
 		}
 	}
 
 	updateSelectedAppearances() {
-		// Reset all
-		for (const selection of this.selectableObjects) {
-			if (selection.unit && selection.unit.halo) {
-				selection.unit.halo.visible = false
+		// Reset all halos
+		for (const mesh of this.selectableObjects) {
+			const unit = (mesh as any).unit
+			if (unit?.halo) {
+				unit.halo.visible = false
 			}
 		}
-		// Update Selected
-		for (let i = 0; i < this.selectedUnits.length; i++) {
-			const object = this.selectedUnits[i]
-
-			if (object.unit && object.unit.halo) {
-				object.unit.halo.visible = true
+		// Show halos on selected units
+		for (const unit of this.selectedUnits) {
+			if (unit.halo) {
+				unit.halo.visible = true
 			}
 		}
 	}
@@ -457,12 +442,11 @@ export class Scene {
 			unit.entityId = id
 
 			if (unit.isSelectable) {
-				// TODO: Fix this
-				//unit.mesh.traverse((child) => {
-				//	if (child.isMesh) {
-				//		this.selectableObjects.push(child)
-				//	}
-				//});
+				unit.mesh.traverse((child: THREE.Object3D) => {
+					if ((child as THREE.Mesh).isMesh) {
+						this.selectableObjects.push(child)
+					}
+				})
 			}
 
 			this.unitsMap[id] = unit
@@ -482,15 +466,85 @@ export class Scene {
 
 		const building = this.buildings.find((b) => b.id === id)
 		if (building) {
-			console.log("Removing building", building)
 			this.buildings = this.buildings.filter((b) => b.id !== id)
 			this.scene.remove(building.model)
 		} else {
+			// Remove child meshes from selectableObjects
+			this.selectableObjects = this.selectableObjects.filter(
+				(mesh: any) => !mesh.unit || mesh.unit.entityId !== id
+			)
 			this.scene.remove(unit.model)
 			this.renderer.renderLists.dispose()
 		}
 
+		// Remove from selected units if present
+		this.selectedUnits = this.selectedUnits.filter(
+			(u: any) => u.entityId !== id
+		)
+
 		delete this.unitsMap[id]
+	}
+
+	/** Track which engine entity IDs are currently rendered */
+	private renderedEntities: Set<number> = new Set()
+
+	/**
+	 * Sync engine game state to Three.js scene.
+	 * Creates new objects for new entities, removes dead ones, updates positions.
+	 */
+	syncFromEngine(game: Game): void {
+		const currentIds = new Set<number>()
+
+		// Sync all players' entities
+		for (const [pid, player] of game.players) {
+			// Fighters (knights)
+			for (const [id, fighter] of player.fighters) {
+				currentIds.add(id)
+				if (!this.renderedEntities.has(id)) {
+					this.addUnit(id, pid, "knight", fighter.position.x, fighter.position.y, fighter.position.z)
+					this.renderedEntities.add(id)
+				} else {
+					this.moveUnit(id, fighter.position.x, fighter.position.z)
+				}
+			}
+
+			// Builders (workers)
+			for (const [id, builder] of player.builders) {
+				currentIds.add(id)
+				if (!this.renderedEntities.has(id)) {
+					this.addUnit(id, pid, "builder", builder.position.x, builder.position.y, builder.position.z)
+					this.renderedEntities.add(id)
+				} else {
+					this.moveUnit(id, builder.position.x, builder.position.z)
+				}
+			}
+
+			// Buildings
+			for (const [id, building] of player.buildings) {
+				currentIds.add(id)
+				if (!this.renderedEntities.has(id)) {
+					this.createBuilding(id, pid, building.buildingType as BuildingType, building.position.x, building.position.z)
+					this.renderedEntities.add(id)
+				}
+			}
+		}
+
+		// Resources
+		for (const [id, resource] of game.resources) {
+			currentIds.add(id)
+			if (!this.renderedEntities.has(id)) {
+				this.createResourceNode(id, resource.resourceType as BuildingType, resource.position.x, resource.position.z, resource.gold, resource.stone, resource.wood)
+				this.renderedEntities.add(id)
+			}
+		}
+
+		// Remove deceased entities
+		for (const id of game.deceased) {
+			if (this.renderedEntities.has(id)) {
+				this.removeUnit(id)
+				this.renderedEntities.delete(id)
+			}
+		}
 	}
 
 	startAnimationLoop() {
@@ -505,13 +559,12 @@ export class Scene {
 				if (mouseButton == 0 && clickLocation) {
 					// Left click
 					const buildingCoordinates = this.getGridCoordinates(clickLocation)
-					this.commandBuffer.push({
-						placeBuilding: {
-							type: this.currentBuildingType,
-							pos: {
-								x: buildingCoordinates.x,
-								z: buildingCoordinates.z,
-							},
+					this.sendCommand({
+						type: "placeBuilding",
+						buildingType: this.currentBuildingType as EngineBuildingType,
+						pos: {
+							x: buildingCoordinates.x,
+							z: buildingCoordinates.z,
 						},
 					})
 					this.isBuilding = false
@@ -677,14 +730,14 @@ export class Scene {
 			this.camera.position.z -= speed
 		}
 
-		// Clamp the camera position to stay within 100 and 300 on the x and z axes
+		// Clamp the camera position to stay within the map bounds
 		this.camera.position.x = Math.min(
-			300,
-			Math.max(100, this.camera.position.x)
+			150,
+			Math.max(-150, this.camera.position.x)
 		)
 		this.camera.position.z = Math.min(
-			300,
-			Math.max(100, this.camera.position.z)
+			150,
+			Math.max(-150, this.camera.position.z)
 		)
 		this.camera.updateProjectionMatrix()
 
