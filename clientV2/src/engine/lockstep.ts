@@ -1,9 +1,7 @@
 import { Command, PlayerID } from "./types";
 import { Game } from "./game";
 
-const TICKS_PER_TURN = 10;
 const DT = 0.05;
-const TURN_DURATION_MS = 100; // Real-time duration of one turn
 
 export type LockstepState = "connecting" | "waiting" | "playing" | "disconnected";
 
@@ -94,15 +92,12 @@ export class LockstepManager {
                 this.currentTurn = 0;
                 this.game = Game.makeTwoPlayerGame(this.seed);
                 this.setState("playing");
-                // Submit commands for turn 0 immediately
-                this.submitTurn();
-                // Start the fixed-rate tick loop
-                this.tickTimer = setInterval(() => this.tick(), TURN_DURATION_MS);
                 break;
 
             case "turn":
                 // Queue the turn for processing at the next tick
                 this.pendingTurns.push(msg);
+                this.tick()
                 break;
 
             case "playerDisconnected":
@@ -126,7 +121,6 @@ export class LockstepManager {
         this.localCommands = [];
     }
 
-    /** Called at fixed TURN_DURATION_MS intervals */
     private tick(): void {
         // Process one pending turn if available
         if (this.pendingTurns.length > 0) {
@@ -151,10 +145,7 @@ export class LockstepManager {
             this.game.applyCommand(2, cmd);
         }
 
-        // Run N ticks for this turn
-        for (let i = 0; i < TICKS_PER_TURN; i++) {
-            this.game.update(DT);
-        }
+        this.game.update(DT);
 
         this.currentTurn++;
         this.callbacks.onTurnApplied(this.game);
