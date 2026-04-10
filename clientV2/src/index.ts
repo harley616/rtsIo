@@ -15,8 +15,9 @@ InitScene()
 async function InitScene() {
 	const models = await loadModels()
 	const params = new URLSearchParams(window.location.search)
-	const mode = params.get("mode") // "create", "join", or null (offline)
-	const joinCode = params.get("code")
+	const mode = params.get("mode") // "multiplayer" or null (offline)
+	const gameCode = params.get("code")
+	const playerParam = params.get("player") // "1" or "2"
 
 	// Shared sendCommand — wired to either local queue or lockstep
 	let sendCommand: (cmd: Command) => void
@@ -39,20 +40,23 @@ async function InitScene() {
 		}
 	}
 
-	if (mode === "create" || mode === "join") {
+	if (mode === "multiplayer" && gameCode && playerParam) {
 		// --- Multiplayer (lockstep) ---
+		const myPlayerId = parseInt(playerParam)
+
 		const lockstep = new LockstepManager({
 			onStateChange: (state) => {
 				if (statusElem) {
 					switch (state) {
 						case "connecting":
-							statusElem.textContent = "Connecting..."
+							statusElem.textContent = "Reconnecting..."
 							break
 						case "waiting":
 							statusElem.textContent = "Waiting for opponent..."
 							break
 						case "playing":
-							statusElem.innerHTML = `Player <span id="player-number">${lockstep.playerId}</span>`
+							statusElem.innerHTML = `Player <span id="player-number">${myPlayerId}</span>`
+							scene.playerId = myPlayerId
 							break
 						case "disconnected":
 							statusElem.textContent = "Disconnected"
@@ -60,37 +64,27 @@ async function InitScene() {
 					}
 				}
 			},
-			onGameCreated: (code) => {
-				if (statusElem) {
-					statusElem.textContent = `Code: ${code} — Waiting for opponent...`
-				}
-				// Update URL so the code is visible/shareable
-				const url = new URL(window.location.href)
-				url.searchParams.set("code", code)
-				window.history.replaceState({}, "", url.toString())
-			},
+			onGameCreated: () => {},
 			onTurnApplied: (game) => {
 				scene.syncFromEngine(game)
-				updateResourceDisplay(game, lockstep.playerId)
+				updateResourceDisplay(game, myPlayerId)
 			},
 		})
 
 		sendCommand = (cmd) => lockstep.sendCommand(cmd)
+		scene.playerId = myPlayerId
+		if (playerNumElem) playerNumElem.innerText = `${myPlayerId}`
 
-		if (mode === "create") {
-			lockstep.createGame(RELAY_URL)
-		} else if (joinCode) {
-			lockstep.joinGame(RELAY_URL, joinCode)
-		}
+		lockstep.reconnectGame(RELAY_URL, gameCode, myPlayerId)
 
-		// Set playerId once known (updates reactively via onStateChange)
-		const checkPlayerId = setInterval(() => {
-			if (lockstep.playerId > 0) {
-				scene.playerId = lockstep.playerId
-				if (playerNumElem) playerNumElem.innerText = `${lockstep.playerId}`
-				clearInterval(checkPlayerId)
+		// Signal ready once assets are loaded (loadModels already awaited above)
+		// Need to wait for the websocket to open before sending
+		const waitForLoaded = setInterval(() => {
+			if (lockstep.getState() !== "connecting") {
+				lockstep.sendLoaded()
+				clearInterval(waitForLoaded)
 			}
-		}, 100)
+		}, 50)
 	} else {
 		// --- Offline single-player ---
 		const pendingCommands: Command[] = []
@@ -179,49 +173,49 @@ async function InitScene() {
 async function loadModels() {
 	var modelsDict: ModelsDict = {}
 	const houseModel_red = (await loadModel(
-		"models/buildings/house/house_red.glb"
+		"/models/buildings/house/house_red.glb"
 	)) as THREE.Object3D
 	const houseModel_blue = (await loadModel(
-		"models/buildings/house/house_blue.glb"
+		"/models/buildings/house/house_blue.glb"
 	)) as THREE.Object3D
 	const townhallModel_red = (await loadModel(
-		"models/buildings/townhall/townhall_red.glb"
+		"/models/buildings/townhall/townhall_red.glb"
 	)) as THREE.Object3D
 	const townhallModel_blue = (await loadModel(
-		"models/buildings/townhall/townhall_blue.glb"
+		"/models/buildings/townhall/townhall_blue.glb"
 	)) as THREE.Object3D
 	const barracksModel_red = (await loadModel(
-		"models/buildings/barracks/barracks_red.glb"
+		"/models/buildings/barracks/barracks_red.glb"
 	)) as THREE.Object3D
 	const barracksModel_blue = (await loadModel(
-		"models/buildings/barracks/barracks_blue.glb"
+		"/models/buildings/barracks/barracks_blue.glb"
 	)) as THREE.Object3D
 	const goldModel = (await loadModelResource(
-		"models/buildings/nodes/gold/gold.glb"
+		"/models/buildings/nodes/gold/gold.glb"
 	)) as THREE.Object3D
 	const stoneModel = (await loadModelResource(
-		"models/buildings/nodes/stone/stone.glb"
+		"/models/buildings/nodes/stone/stone.glb"
 	)) as THREE.Object3D
 	const wood = (await loadModelResource(
-		"models/buildings/nodes/wood/wood.glb"
+		"/models/buildings/nodes/wood/wood.glb"
 	)) as THREE.Object3D
 	const knight_red_idle = (await loadModelResource(
-		"models/characters/knight_red/knight_red_idle.glb"
+		"/models/characters/knight_red/knight_red_idle.glb"
 	)) as THREE.Object3D
 	const knight_blue_idle = (await loadModelResource(
-		"models/characters/knight_blue/knight_blue_idle.glb"
+		"/models/characters/knight_blue/knight_blue_idle.glb"
 	)) as THREE.Object3D
 	const knight_red_attack = (await loadModelResource(
-		"models/characters/knight_red/knight_red_attack.glb"
+		"/models/characters/knight_red/knight_red_attack.glb"
 	)) as THREE.Object3D
 	const knight_blue_attack = (await loadModelResource(
-		"models/characters/knight_blue/knight_blue_attack.glb"
+		"/models/characters/knight_blue/knight_blue_attack.glb"
 	)) as THREE.Object3D
 	const worker_red = (await loadModelResource(
-		"models/characters/worker/worker_red.glb"
+		"/models/characters/worker/worker_red.glb"
 	)) as THREE.Object3D
 	const worker_blue = (await loadModelResource(
-		"models/characters/worker/worker_blue.glb"
+		"/models/characters/worker/worker_blue.glb"
 	)) as THREE.Object3D
 	modelsDict.house = [houseModel_blue, houseModel_red]
 	modelsDict.townhall = [townhallModel_blue, townhallModel_red]

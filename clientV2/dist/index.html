@@ -4,48 +4,102 @@
 		<meta charset="utf-8" />
 		<title>RTS.io</title>
 		<link rel="stylesheet" href="/style.css" />
-		<script type="module" crossorigin src="/assets/index-RltyMy2A.js"></script>
+		<style>
+			body {
+				overflow: auto;
+				background-color: #333344;
+				color: #eed7a1;
+				font-family: 'Times New Roman', Times, serif;
+				display: flex;
+				justify-content: center;
+				align-items: center;
+				min-height: 100vh;
+			}
+			#lobby-container {
+				text-align: center;
+				padding: 40px;
+			}
+			#lobby-container h1 {
+				font-size: 3rem;
+				margin-bottom: 30px;
+			}
+			.lobby-section {
+				margin: 20px 0;
+				padding: 20px;
+				background: rgba(238, 215, 161, 0.1);
+				border-radius: 8px;
+			}
+			.lobby-section h2 {
+				margin-bottom: 15px;
+			}
+			input[type="text"] {
+				font-family: 'Times New Roman', Times, serif;
+				font-size: 1.25rem;
+				padding: 10px 15px;
+				border: 2px solid #80714f;
+				border-radius: 3px;
+				background: #eed7a1;
+				color: #333;
+				text-align: center;
+				text-transform: uppercase;
+				letter-spacing: 3px;
+				width: 150px;
+			}
+			input[type="text"]::placeholder {
+				text-transform: none;
+				letter-spacing: normal;
+				color: #999;
+			}
+			#game-code-display {
+				font-size: 2rem;
+				letter-spacing: 5px;
+				font-weight: bold;
+				margin: 10px 0;
+				color: #fff;
+			}
+			#status-message {
+				margin-top: 15px;
+				font-size: 1.1rem;
+				min-height: 1.5em;
+			}
+			.lobby-divider {
+				margin: 20px 0;
+				font-size: 1.25rem;
+				opacity: 0.5;
+			}
+		</style>
+		<script type="module" crossorigin src="/assets/main-GfE0cpHV.js"></script>
+		<link rel="modulepreload" crossorigin href="/assets/protocol-7eDd7qDe.js">
 	</head>
-
 	<body>
-		<div id="threejs-container"></div>
+		<div id="lobby-container">
+			<h1>RTS.io</h1>
 
-		<div id="ui-topbar">
-			<div id="info-container">
-				<div class="info-item">
-					<h1>RTS.io</h1>
-				</div>
-				<div class="info-item">
-					<h2 id="player-label">Player <span id="player-number">-1</span></h2>
-				</div>
-				<div class="info-item">Gold: <span id="gold">0</span></div>
-				<div class="info-item">Stone: <span id="stone">0</span></div>
-				<div class="info-item">Wood: <span id="wood">0</span></div>
-				<div class="info-item">
-					Population: <span id="population">0</span>
-				</div>
+			<div class="lobby-section">
+				<h2>Host a Game</h2>
+				<button id="create-game" class="pushable">
+					<span class="front">Create Game</span>
+				</button>
+				<div id="game-code-display" style="display: none;"></div>
 			</div>
-		</div>
 
-		<div id="ui-bottombar">
-			<div id="build_menu">
-				<h1>Building Menu</h1>
-				<button id="addHouse" class="pushable">
-					<span class="front">House</span>
-				</button>
-				<button id="addTownHall" class="pushable">
-					<span class="front">Town Hall</span>
-				</button>
-				<button id="addBarracks" class="pushable">
-					<span class="front">Barracks</span>
-				</button>
-				<button id="addKnight" class="pushable">
-					<span class="front">Hire Knight</span>
-				</button>
-				<button id="addWorker" class="pushable">
-					<span class="front">Hire Worker</span>
+			<div class="lobby-divider">- or -</div>
+
+			<div class="lobby-section">
+				<h2>Join a Game</h2>
+				<input type="text" id="join-code" placeholder="Enter code" maxlength="6" />
+				<button id="join-game" class="pushable">
+					<span class="front">Join</span>
 				</button>
 			</div>
+
+			<div class="lobby-section">
+				<button id="play-offline" class="pushable">
+					<span class="front">Play Offline</span>
+				</button>
+			</div>
+
+			<div id="status-message"></div>
 		</div>
 
 	</body>

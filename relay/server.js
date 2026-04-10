@@ -1,14 +1,15 @@
 import { WebSocketServer } from "ws";
 
 const PORT = 3001;
-const TURN_DURATION_MS = 100; // 10 sim ticks per turn at 10ms each
+const TURN_DURATION_MS = 10;
+const RECONNECT_GRACE_MS = 5000;
 
 /** @type {Map<string, Game>} */
 const games = new Map();
 
 /**
- * @typedef {{ ws: import('ws').WebSocket, playerId: number, commands: any[], turnAcked: number }} PlayerConn
- * @typedef {{ code: string, players: PlayerConn[], turn: number, seed: number, started: boolean, turnTimer: ReturnType<typeof setInterval> | null }} Game
+ * @typedef {{ ws: import('ws').WebSocket | null, playerId: number, commands: any[], turnAcked: number }} PlayerConn
+ * @typedef {{ code: string, players: PlayerConn[], turn: number, seed: number, started: boolean, turnTimer: ReturnType<typeof setInterval> | null, destroyTimer: ReturnType<typeof setTimeout> | null }} Game
  */
 
 function generateCode() {
@@ -34,7 +35,7 @@ wss.on("connection", (ws) => {
       case "create": {
         const code = generateCode();
         const seed = Math.floor(Math.random() * 2147483647);
-        game = { code, players: [], turn: 0, seed, started: false, turnTimer: null };
+        game = { code, players: [], turn: 0, seed, started: false, turnTimer: null, destroyTimer: null };
         player = { ws, playerId: 1, commands: [], turnAcked: -1 };
         game.players.push(player);
         games.set(code, game);
@@ -60,17 +61,55 @@ wss.on("connection", (ws) => {
         break;
       }
 
+      case "reconnect": {
+        // Reconnect to an existing game (e.g., after page navigation from lobby to game)
+        const code = msg.code?.toUpperCase();
+        const pid = msg.playerId;
+        game = games.get(code) ?? null;
+        if (!game) {
+          ws.send(JSON.stringify({ type: "error", message: "Game not found" }));
+          return;
+        }
+        const existing = game.players.find((p) => p.playerId === pid);
+        if (!existing) {
+          ws.send(JSON.stringify({ type: "error", message: "Player not found in game" }));
+          return;
+        }
+
+        // Cancel any pending destroy timer
+        if (game.destroyTimer) {
+          clearTimeout(game.destroyTimer);
+          game.destroyTimer = null;
+        }
+
+        // Replace the websocket
+        existing.ws = ws;
+        player = existing;
+
+        ws.send(JSON.stringify({
+          type: "reconnected",
+          code,
+          playerId: pid,
+          seed: game.seed,
+          turn: game.turn,
+          started: game.started,
+        }));
+        console.log(`Player ${pid} reconnected to game ${code}`);
+
+        // If the game was started and both players are now connected, resume
+        if (game.started && game.players.every((p) => p.ws?.readyState === 1)) {
+          console.log(`Game ${code} resumed`);
+        }
+        break;
+      }
+
       case "commands": {
-        // Player submitting commands for a turn
         if (!game || !player) return;
         const turn = msg.turn;
-        if (turn !== game.turn) return; // ignore stale/future turns
+        if (turn !== game.turn) return;
 
-        player.commands = msg.commands ?? [];
+        player.commands = [...player.commands, ...(msg.commands ?? [])];
         player.turnAcked = turn;
-
-        // Check if both players have submitted for this turn
-        tryAdvanceTurn(game);
         break;
       }
     }
@@ -79,27 +118,35 @@ wss.on("connection", (ws) => {
   ws.on("close", () => {
     if (game && player) {
       console.log(`Player ${player.playerId} disconnected from game ${game.code}`);
-      // Notify other player
-      for (const p of game.players) {
-        if (p !== player && p.ws.readyState === 1) {
-          p.ws.send(JSON.stringify({ type: "playerDisconnected", playerId: player.playerId }));
-        }
+      player.ws = null;
+
+      // Grace period before destroying the game
+      if (!game.destroyTimer) {
+        game.destroyTimer = setTimeout(() => {
+          console.log(`Game ${game.code} destroyed (reconnect timeout)`);
+          // Notify remaining player
+          for (const p of game.players) {
+            if (p.ws?.readyState === 1) {
+              p.ws.send(JSON.stringify({ type: "playerDisconnected", playerId: player.playerId }));
+            }
+          }
+          if (game.turnTimer) clearInterval(game.turnTimer);
+          games.delete(game.code);
+        }, RECONNECT_GRACE_MS);
       }
-      if (game.turnTimer) clearInterval(game.turnTimer);
-      games.delete(game.code);
     }
   });
 });
 
 function startGame(game) {
-  // Notify both players the game is starting
   for (const p of game.players) {
-    p.ws.send(JSON.stringify({ type: "start", turn: 0 }));
+    if (p.ws?.readyState === 1) {
+      p.ws.send(JSON.stringify({ type: "start", turn: 0 }));
+    }
   }
   game.started = true;
   console.log(`Game ${game.code} started`);
 
-  // Turn timeout: if a player doesn't submit within 2x turn duration, send empty commands
   game.turnTimer = setInterval(() => {
     for (const p of game.players) {
       if (p.turnAcked < game.turn) {
@@ -108,14 +155,12 @@ function startGame(game) {
       }
     }
     tryAdvanceTurn(game);
-  }, TURN_DURATION_MS * 3);
+  }, TURN_DURATION_MS);
 }
 
 function tryAdvanceTurn(game) {
-  // Both players must have submitted
   if (game.players.some((p) => p.turnAcked < game.turn)) return;
 
-  // Build combined command set
   const turnData = {
     type: "turn",
     turn: game.turn,
@@ -125,15 +170,15 @@ function tryAdvanceTurn(game) {
     },
   };
 
-  // Send to both players
   const msg = JSON.stringify(turnData);
   for (const p of game.players) {
-    if (p.ws.readyState === 1) {
+    if (p.ws?.readyState === 1) {
       p.ws.send(msg);
+      while (p.ws) {
+      }
     }
   }
 
-  // Advance turn
   game.turn++;
   for (const p of game.players) {
     p.commands = [];

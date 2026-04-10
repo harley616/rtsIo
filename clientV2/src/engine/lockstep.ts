@@ -1,5 +1,8 @@
-import { Command, PlayerID } from "./types";
 import { Game } from "./game";
+import {
+    NetOp, Command,
+    decodeMessage, encodeCreate, encodeJoin, encodeReconnect, encodeCommandsMsg, encodeAck, encodeLoaded,
+} from "../../../shared/protocol";
 
 const DT = 0.05;
 
@@ -18,33 +21,43 @@ export class LockstepManager {
     private currentTurn = 0;
     private state: LockstepState = "connecting";
     private callbacks: LockstepCallbacks;
-    private pendingTurns: any[] = [];
+    private pendingTurns: { turn: number; p1Commands: Command[]; p2Commands: Command[] }[] = [];
     private tickTimer: ReturnType<typeof setInterval> | null = null;
 
-    playerId: PlayerID = -1;
-    seed: number = 0;
+    playerId = -1;
+    seed = 0;
 
     constructor(callbacks: LockstepCallbacks) {
         this.callbacks = callbacks;
     }
 
-    /** Queue a command to be sent on the next turn boundary */
     sendCommand(cmd: Command): void {
         this.localCommands.push(cmd);
     }
 
-    /** Connect to relay and create a new game */
     createGame(serverUrl: string): void {
         this.connect(serverUrl, () => {
-            this.ws!.send(JSON.stringify({ type: "create" }));
+            this.ws!.send(encodeCreate());
         });
     }
 
-    /** Connect to relay and join an existing game */
     joinGame(serverUrl: string, code: string): void {
         this.connect(serverUrl, () => {
-            this.ws!.send(JSON.stringify({ type: "join", code }));
+            this.ws!.send(encodeJoin(code));
         });
+    }
+
+    reconnectGame(serverUrl: string, code: string, playerId: number): void {
+        this.connect(serverUrl, () => {
+            this.ws!.send(encodeReconnect(code, playerId));
+        });
+    }
+
+    /** Signal to the relay that this client has finished loading and is ready */
+    sendLoaded(): void {
+        if (this.ws?.readyState === WebSocket.OPEN) {
+            this.ws.send(encodeLoaded());
+        }
     }
 
     getGame(): Game | null {
@@ -54,57 +67,73 @@ export class LockstepManager {
     private connect(url: string, onOpen: () => void): void {
         this.setState("connecting");
         this.ws = new WebSocket(url);
+        this.ws.binaryType = "arraybuffer";
 
-        this.ws.onopen = () => {
-            onOpen();
-        };
+        this.ws.onopen = () => onOpen();
 
         this.ws.onmessage = (event) => {
-            const msg = JSON.parse(event.data);
-            this.handleMessage(msg);
+            const data = new Uint8Array(event.data as ArrayBuffer);
+            const msg = decodeMessage(data);
+            if (msg) this.handleMessage(msg);
         };
 
-        this.ws.onclose = () => {
-            this.setState("disconnected");
-        };
-
-        this.ws.onerror = () => {
-            this.setState("disconnected");
-        };
+        this.ws.onclose = () => this.setState("disconnected");
+        this.ws.onerror = () => this.setState("disconnected");
     }
 
-    private handleMessage(msg: any): void {
-        switch (msg.type) {
-            case "created":
+    private handleMessage(msg: ReturnType<typeof decodeMessage>): void {
+        if (!msg) return;
+
+        switch (msg.op) {
+            case NetOp.Created:
                 this.playerId = msg.playerId;
                 this.seed = msg.seed;
                 this.setState("waiting");
                 this.callbacks.onGameCreated(msg.code);
                 break;
 
-            case "joined":
+            case NetOp.Joined:
                 this.playerId = msg.playerId;
                 this.seed = msg.seed;
                 this.setState("waiting");
                 break;
 
-            case "start":
+            case NetOp.Reconnected:
+                console.log("Reconnected to game", msg);
+                this.playerId = msg.playerId;
+                this.seed = msg.seed;
+                if (msg.started) {
+                    this.currentTurn = msg.turn;
+                    this.game = Game.makeTwoPlayerGame(this.seed);
+                    this.setState("playing");
+                    this.submitTurn();
+                } else {
+                    this.setState("waiting");
+                }
+                break;
+
+            case NetOp.Start:
                 this.currentTurn = 0;
                 this.game = Game.makeTwoPlayerGame(this.seed);
                 this.setState("playing");
+                this.submitTurn();
                 break;
 
-            case "turn":
-                // Queue the turn for processing at the next tick
-                this.pendingTurns.push(msg);
-                this.tick()
+            case NetOp.Turn:
+                this.pendingTurns.push({
+                    turn: msg.turn,
+                    p1Commands: msg.p1Commands,
+                    p2Commands: msg.p2Commands,
+                });
+                this.ws?.send(encodeAck(this.game ? this.game.elapsedTime : 0));
+                this.tick();
                 break;
 
-            case "playerDisconnected":
+            case NetOp.PlayerDisconnected:
                 this.setState("disconnected");
                 break;
 
-            case "error":
+            case NetOp.Error:
                 console.error("Relay error:", msg.message);
                 break;
         }
@@ -112,36 +141,25 @@ export class LockstepManager {
 
     private submitTurn(): void {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-
-        this.ws.send(JSON.stringify({
-            type: "commands",
-            turn: this.currentTurn,
-            commands: this.localCommands,
-        }));
+        this.ws.send(encodeCommandsMsg(this.currentTurn, this.localCommands));
         this.localCommands = [];
     }
 
     private tick(): void {
-        // Process one pending turn if available
         if (this.pendingTurns.length > 0) {
-            const msg = this.pendingTurns.shift()!;
-            this.applyTurn(msg);
+            const turnData = this.pendingTurns.shift()!;
+            this.applyTurn(turnData);
         }
-        // Submit commands for the next turn
         this.submitTurn();
     }
 
-    private applyTurn(msg: any): void {
-        if (!this.game || msg.turn !== this.currentTurn) return;
+    private applyTurn(turnData: { turn: number; p1Commands: Command[]; p2Commands: Command[] }): void {
+        if (!this.game || turnData.turn !== this.currentTurn) return;
 
-        const p1Commands: Command[] = msg.commands["1"] ?? [];
-        const p2Commands: Command[] = msg.commands["2"] ?? [];
-
-        // Apply commands from both players
-        for (const cmd of p1Commands) {
+        for (const cmd of turnData.p1Commands) {
             this.game.applyCommand(1, cmd);
         }
-        for (const cmd of p2Commands) {
+        for (const cmd of turnData.p2Commands) {
             this.game.applyCommand(2, cmd);
         }
 
@@ -149,6 +167,11 @@ export class LockstepManager {
 
         this.currentTurn++;
         this.callbacks.onTurnApplied(this.game);
+
+        // Tell the relay we finished this turn and our elapsed time
+        if (this.ws?.readyState === WebSocket.OPEN) {
+            this.ws.send(encodeAck(this.game.elapsedTime));
+        }
     }
 
     private setState(state: LockstepState): void {

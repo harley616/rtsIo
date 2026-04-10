@@ -109,27 +109,9 @@ export interface Player {
     buildings: Map<EntityID, Building>;
 }
 
-// --- Commands ---
+// --- Commands (re-exported from shared protocol) ---
 
-export interface MoveUnitCommand {
-    type: "moveUnit";
-    entityId: EntityID;
-    pos: { x: number; y: number; z: number };
-    moveType: "passive" | "aggressive";
-}
-
-export interface PlaceBuildingCommand {
-    type: "placeBuilding";
-    buildingType: BuildingType;
-    pos: GridLocation;
-}
-
-export interface CreateKnightCommand {
-    type: "createKnight";
-}
-
-export interface CreateBuilderCommand {
-    type: "createBuilder";
-}
-
-export type Command = MoveUnitCommand | PlaceBuildingCommand | CreateKnightCommand | CreateBuilderCommand;
+export type {
+    Command, MoveUnitCommand, PlaceBuildingCommand,
+    CreateKnightCommand, CreateBuilderCommand,
+} from "../../../shared/protocol";
