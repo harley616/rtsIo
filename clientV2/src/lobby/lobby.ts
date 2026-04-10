@@ -2,7 +2,7 @@ import {
     NetOp, decodeMessage, encodeCreate, encodeJoin,
 } from "../../../shared/protocol";
 
-const RELAY_URL = "ws://localhost:3001";
+const RELAY_URL = (import.meta.env.DEV ? "ws://localhost:3001/" : "wss://rts.waterthegarden.com/relay/");
 
 const createBtn = document.getElementById("create-game") as HTMLButtonElement;
 const joinBtn = document.getElementById("join-game") as HTMLButtonElement;

@@ -8,7 +8,7 @@ import { LockstepManager } from "./engine/lockstep"
 
 const TICK_MS = 10
 const DT = 0.05
-const RELAY_URL = "ws://localhost:3001"
+const RELAY_URL = import.meta.env.DEV ? "ws://localhost:3001/" : "wss://rts.waterthegarden.com/relay/"
 
 InitScene()
 
@@ -64,7 +64,7 @@ async function InitScene() {
 					}
 				}
 			},
-			onGameCreated: () => {},
+			onGameCreated: () => { },
 			onTurnApplied: (game) => {
 				scene.syncFromEngine(game)
 				updateResourceDisplay(game, myPlayerId)

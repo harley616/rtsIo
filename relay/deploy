@@ -1,0 +1,26 @@
+#!/bin/bash
+
+# --- Configuration ---
+SERVER="main"       # Your domain or IP
+DEST_FOLDER="~/rtsIoRelay"    # Where the files go on the server
+BUILD_FOLDER="dist"                  # Vite's default output folder
+
+tsc
+
+if [ $? -eq 0 ]; then
+    echo "✅ Build successful. Syncing files to server..."
+    
+    # -a: archive mode (preserves permissions/timestamps)
+    # -v: verbose (shows progress)
+    # -z: compress (speeds up transfer)
+    # --delete: removes files on server that no longer exist locally
+    rsync -avz --delete ./package.json ./package-lock.json ./$BUILD_FOLDER/ $SERVER:$DEST_FOLDER
+    
+    echo "🎉 Deployment complete!"
+else
+    echo "❌ Build failed. Deployment aborted."
+    exit 1
+fi
+
+
+

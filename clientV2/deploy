@@ -1,0 +1,24 @@
+#!/bin/bash
+
+# --- Configuration ---
+SERVER="main"       # Your domain or IP
+DEST_FOLDER="/var/www/html/rtsIo"    # Where the files go on the server
+BUILD_FOLDER="dist"                  # Vite's default output folder
+
+echo "🚀 Starting build process..."
+npm run build
+
+if [ $? -eq 0 ]; then
+    echo "✅ Build successful. Syncing files to server..."
+    
+    # -a: archive mode (preserves permissions/timestamps)
+    # -v: verbose (shows progress)
+    # -z: compress (speeds up transfer)
+    # --delete: removes files on server that no longer exist locally
+    rsync -avz --delete ./$BUILD_FOLDER/ $SERVER:$DEST_FOLDER
+    
+    echo "🎉 Deployment complete!"
+else
+    echo "❌ Build failed. Deployment aborted."
+    exit 1
+fi
