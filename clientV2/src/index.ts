@@ -1,70 +1,135 @@
 import * as THREE from "three"
-import { Command, Scene } from "./scene/scene"
+import { Scene } from "./scene"
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader"
 import { ModelsDict } from "./types/models"
-import { Game } from "./game/game"
-import { initPlayer } from "./game/initPlayer"
-import { initialiazePlayerDisplay, initializeControlButtons } from "./uiHelpers/uiHelpers"
+import { Game } from "./engine/game"
+import { Command } from "./engine/types"
+import { LockstepManager } from "./engine/lockstep"
+
+const TICK_MS = 10
+const DT = 0.05
+const RELAY_URL = import.meta.env.DEV ? "ws://localhost:3001/" : "wss://rts.waterthegarden.com/relay/"
 
 InitScene()
 
-const urlSearchParams = new URLSearchParams(window.location.search)
-const port = urlSearchParams.get("portNumber")
-const host = "10.0.0.100"
-
-const sleep = (ms: number) => {
-	return new Promise((resolve) => { setTimeout(resolve, ms) })
-}
-
 async function InitScene() {
 	const models = await loadModels()
-	const commandBuffer: Command[] = []
-	const scene = new Scene("threejs-container", models, commandBuffer)
-	const game = new Game(scene)
-	const player = initPlayer(game)
+	const params = new URLSearchParams(window.location.search)
+	const mode = params.get("mode") // "multiplayer" or null (offline)
+	const gameCode = params.get("code")
+	const playerParam = params.get("player") // "1" or "2"
+
+	// Shared sendCommand — wired to either local queue or lockstep
+	let sendCommand: (cmd: Command) => void
+
+	const scene = new Scene("threejs-container", models, (cmd) => sendCommand(cmd))
 	scene.startAnimationLoop()
 
-	// const socket = new WebSocket("ws://10.0.0.43:8080/ws")
-	const socket = new WebSocket(`ws://${host}:8080/${port}`)
-
-	window.addEventListener("keydown", (event) => {
-		if (event.key.toLowerCase() === "t") {
-			const command = prompt("Enter terminal command:")
-			console.log("Sending command: " + command)
-			const messageMap = {
-				messageType: "command",
-				data: {
-					command: command,
-				},
-			}
-			socket.send(JSON.stringify(messageMap))
-			console.log(JSON.stringify(messageMap))
-		}
-	})
-
-	socket.addEventListener("open", (event: Event) => {
-		console.log("Connected to server", event)
-	})
-
-	socket.addEventListener("error", function (event) {
-		console.error("Error connecting to server", event)
-	})
-
-	initializeControlButtons(scene)
-
 	const playerNumElem = document.getElementById("player-number")
-	if (!playerNumElem) {
-		throw new Error("Player number element not found")
+	const goldDisplay = document.getElementById("gold")
+	const woodDisplay = document.getElementById("wood")
+	const stoneDisplay = document.getElementById("stone")
+	const statusElem = document.getElementById("player-label")
+
+	function updateResourceDisplay(game: Game, playerId: number) {
+		const player = game.players.get(playerId)
+		if (player) {
+			if (goldDisplay) goldDisplay.innerText = `${Math.floor(player.gold)}`
+			if (stoneDisplay) stoneDisplay.innerText = `${Math.floor(player.stone)}`
+			if (woodDisplay) woodDisplay.innerText = `${Math.floor(player.wood)}`
+		}
 	}
 
-	initialiazePlayerDisplay(player)
+	if (mode === "multiplayer" && gameCode && playerParam) {
+		// --- Multiplayer (lockstep) ---
+		const myPlayerId = parseInt(playerParam)
 
-	// Handle resizing
-	// window.addEventListener("resize", () => {
-	// 	camera.aspect = window.innerWidth / window.innerHeight
-	// 	camera.updateProjectionMatrix()
-	// 	renderer.setSize(window.innerWidth, window.innerHeight)
-	// })
+		const lockstep = new LockstepManager({
+			onStateChange: (state) => {
+				if (statusElem) {
+					switch (state) {
+						case "connecting":
+							statusElem.textContent = "Reconnecting..."
+							break
+						case "waiting":
+							statusElem.textContent = "Waiting for opponent..."
+							break
+						case "playing":
+							statusElem.innerHTML = `Player <span id="player-number">${myPlayerId}</span>`
+							scene.playerId = myPlayerId
+							break
+						case "disconnected":
+							statusElem.textContent = "Disconnected"
+							break
+					}
+				}
+			},
+			onGameCreated: () => { },
+			onTurnApplied: (game) => {
+				scene.syncFromEngine(game)
+				updateResourceDisplay(game, myPlayerId)
+			},
+		})
+
+		sendCommand = (cmd) => lockstep.sendCommand(cmd)
+		scene.playerId = myPlayerId
+		if (playerNumElem) playerNumElem.innerText = `${myPlayerId}`
+
+		lockstep.reconnectGame(RELAY_URL, gameCode, myPlayerId)
+
+		// Signal ready once assets are loaded (loadModels already awaited above)
+		// Need to wait for the websocket to open before sending
+		const waitForLoaded = setInterval(() => {
+			if (lockstep.getState() !== "connecting") {
+				lockstep.sendLoaded()
+				clearInterval(waitForLoaded)
+			}
+		}, 50)
+	} else {
+		// --- Offline single-player ---
+		const pendingCommands: Command[] = []
+		sendCommand = (cmd) => pendingCommands.push(cmd)
+
+		const game = Game.makeTwoPlayerGame()
+		scene.playerId = 1
+		if (playerNumElem) playerNumElem.innerText = "1"
+
+		setInterval(() => {
+			while (pendingCommands.length > 0) {
+				game.applyCommand(scene.playerId, pendingCommands.shift()!)
+			}
+			game.update(DT)
+			scene.syncFromEngine(game)
+			updateResourceDisplay(game, scene.playerId)
+		}, TICK_MS)
+	}
+
+	// --- UI Button handlers ---
+
+	document.getElementById("addHouse")?.addEventListener("click", () => {
+		scene.isBuilding = true
+		scene.currentBuildingType = "house"
+	})
+
+	document.getElementById("addTownHall")?.addEventListener("click", () => {
+		scene.isBuilding = true
+		scene.currentBuildingType = "townhall"
+	})
+
+	document.getElementById("addBarracks")?.addEventListener("click", () => {
+		scene.isBuilding = true
+		scene.currentBuildingType = "barracks"
+	})
+
+	document.getElementById("addKnight")?.addEventListener("click", () => {
+		sendCommand({ type: "createKnight" })
+	})
+
+	document.getElementById("addWorker")?.addEventListener("click", () => {
+		sendCommand({ type: "createBuilder" })
+	})
+
+	// --- Input handlers ---
 
 	window.addEventListener("mousemove", (event) => {
 		scene.mouseX = (event.clientX / window.innerWidth) * 2 - 1
@@ -91,8 +156,6 @@ async function InitScene() {
 			const maxZoom = 3.0
 			const zoomSensitivity = 0.001
 			event.preventDefault()
-
-			// Adjust zoom based on the vertical scroll amount (deltaY)
 			scene.zoom += event.deltaY * zoomSensitivity
 			scene.zoom = Math.min(maxZoom, Math.max(minZoom, scene.zoom))
 			scene.updateCamera()
@@ -103,31 +166,9 @@ async function InitScene() {
 	window.addEventListener("contextmenu", (event) => {
 		event.preventDefault()
 	})
-
-	const handleMessage = (event: MessageEvent) => {
-		// TODO: Make this use binary data
-		const message = JSON.parse(event.data)
-		console.log(message)
-		switch (message.messageType) {
-			case "playerNumber":
-				playerNumElem.innerText = `${message.data.playerNumber}`
-				break
-			case "commandResponse":
-				break
-			default:
-				console.log("Unknown message type", message.type)
-		}
-	}
-
-	socket.addEventListener("message", function (event) {
-		handleMessage(event)
-	})
-
-	while (1) {
-		game.gameLoop()
-		await sleep(100)
-	}
 }
+
+// --- Model loading ---
 
 async function loadModels() {
 	var modelsDict: ModelsDict = {}
@@ -235,7 +276,6 @@ async function loadModelResource(path: string) {
 						child.castShadow = true
 					}
 				})
-				console.log("Model loaded")
 				resolve(model)
 			},
 			undefined,

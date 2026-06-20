@@ -116,7 +116,7 @@ export class Building {
 		this.health = 100
 	}
 
-	async loadModel(type: BuildingType): Promise<void> { }
+	async loadModel(type: BuildingType): Promise<void> {}
 
 	moveTo(position: THREE.Vector3): void {
 		this.gridPosition = position
@@ -142,7 +142,7 @@ export class Building {
 	setVisible(visible: boolean): void {
 		this.model.traverse((child: THREE.Object3D) => {
 			if ((child as any).isMesh) {
-				; (child as THREE.Mesh).visible = visible
+				;(child as THREE.Mesh).visible = visible
 			}
 		})
 	}
@@ -157,7 +157,7 @@ export class Building {
 				mesh.castShadow = false
 				mesh.receiveShadow = false
 				if (!Array.isArray(mesh.material)) {
-					; (mesh.material as THREE.MeshStandardMaterial).color = color
+					;(mesh.material as THREE.MeshStandardMaterial).color = color
 					mesh.material.opacity = 0.2
 				}
 			}
@@ -174,7 +174,7 @@ export class Building {
 				mesh.castShadow = false
 				mesh.receiveShadow = false
 				if (!Array.isArray(mesh.material)) {
-					; (mesh.material as THREE.MeshStandardMaterial).color = color
+					;(mesh.material as THREE.MeshStandardMaterial).color = color
 					mesh.material.opacity = 0.4
 				}
 			}

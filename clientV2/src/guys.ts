@@ -19,7 +19,7 @@ interface MeshWithUnit extends THREE.Mesh {
 	unit?: Unit
 }
 
-export class Unit {
+class Unit {
 	id: number
 	pId: number
 	isSelectable?: boolean
