@@ -9,7 +9,7 @@ export const GROUND_PLANE_SIZE = 500
  */
 export function createGround(): THREE.Mesh {
 	const size = GROUND_PLANE_SIZE
-	const baseColor = { r: 8, g: 20, b: 9 } // corresponds to 0x2c7037
+	const baseColor = { r: 8, g: 20, b: 9 } // intentionally near-black dark green
 
 	// Set the desaturation factor (0 = no desaturation, 1 = fully grayscale)
 	const desaturationFactor = 0.2
@@ -34,7 +34,7 @@ export function createGround(): THREE.Mesh {
 	for (let y = 0; y < noiseCanvas.height; y++) {
 		for (let x = 0; x < noiseCanvas.width; x++) {
 			const index = (y * noiseCanvas.width + x) * 4
-			// Generate a noise value between -15 and 15 for subtle variation
+			// Subtle noise in [-2, 2] so variation goes both lighter and darker
 			const noiseVal = Math.random() * 4 - 10
 
 			// Apply the noise to each channel
@@ -94,36 +94,33 @@ export function createGround(): THREE.Mesh {
 }
 
 /**
- * Builds the lighting rig: a (currently disabled) ambient light plus three
- * shadow-casting directional lights. Returns the lights ready to add to a scene.
+ * Builds the lighting rig: three shadow-casting directional lights.
+ * Returns the lights ready to add to a scene.
  */
-export function createLights(): THREE.Light[] {
+export function createLights(): THREE.DirectionalLight[] {
 	const lights = [
-		new THREE.AmbientLight(0xffffff, 0),
 		new THREE.DirectionalLight(0xffffff, 3),
 		new THREE.DirectionalLight(0xffffff, 0.5),
 		new THREE.DirectionalLight(0xffffff, 0.2),
 	]
 
 	const d = 200
-	lights[1].position.set(1 * d, 1 * d, -1 * d)
-	lights[2].position.set(1 * d, 1 * d, 0)
-	lights[3].position.set(0, 1 * d, 1 * d)
+	lights[0].position.set(1 * d, 1 * d, -1 * d)
+	lights[1].position.set(1 * d, 1 * d, 0)
+	lights[2].position.set(0, 1 * d, 1 * d)
 
 	lights.forEach((light) => {
-		if (light instanceof THREE.DirectionalLight) {
-			light.castShadow = true
-			light.shadow.mapSize.width = 2048 * 3
-			light.shadow.mapSize.height = 2048 * 3
+		light.castShadow = true
+		light.shadow.mapSize.width = 2048 * 3
+		light.shadow.mapSize.height = 2048 * 3
 
-			light.shadow.camera.left = -d
-			light.shadow.camera.right = d
-			light.shadow.camera.top = d
-			light.shadow.camera.bottom = -d
-			light.shadow.camera.near = 0.1
-			light.shadow.camera.far = 500
-			light.shadow.camera.updateProjectionMatrix()
-		}
+		light.shadow.camera.left = -d
+		light.shadow.camera.right = d
+		light.shadow.camera.top = d
+		light.shadow.camera.bottom = -d
+		light.shadow.camera.near = 0.1
+		light.shadow.camera.far = 500
+		light.shadow.camera.updateProjectionMatrix()
 	})
 
 	return lights
