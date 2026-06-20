@@ -2,6 +2,7 @@ import * as THREE from "three"
 import { SelectionBox } from "three/examples/jsm/interactive/SelectionBox"
 import { SelectionHelper } from "three/examples/jsm/interactive/SelectionHelper"
 import { Building } from "./structures/building"
+import { createGround, createLights, GROUND_PLANE_SIZE } from "./environment"
 import { Knight, Builder } from "./guys"
 import { BuildingType } from "./types/models"
 import { Game } from "./engine/game"
@@ -84,124 +85,15 @@ export class Scene {
 		this.container.appendChild(this.renderer.domElement)
 
 		// Ground plane
-		const groundPlaneSize = 500
-		// const planeGeometry = new THREE.PlaneGeometry(
-		// 	groundPlaneSize,
-		// 	groundPlaneSize
-		// )
-		// const planeMaterial = new THREE.MeshLambertMaterial({
-		// 	color: 0x2c7037,
-		// 	shadowSide: THREE.DoubleSide,
-		// })
-		// this.groundPlane = new THREE.Mesh(planeGeometry, planeMaterial)
-		// this.groundPlane.rotation.x = -Math.PI / 2
-		// this.groundPlane.receiveShadow = true
-		// this.scene.add(this.groundPlane)
-
-		{
-			// Define the ground plane size and base color for your grass
-			const groundPlaneSize = 500
-			var baseColor = { r: 8, g: 20, b: 9 } // corresponds to 0x2c7037
-
-			// Set the desaturation factor (0 = no desaturation, 1 = fully grayscale)
-			const desaturationFactor = 0.2
-			const darkenFactor = 1 // Multiply the grayscale value to darken it
-
-			// Create a low-resolution canvas to generate large, subtle noise
-			const noiseCanvas = document.createElement("canvas")
-			noiseCanvas.width = 64 // Low resolution for large noise blocks
-			noiseCanvas.height = 64
-			const noiseContext = noiseCanvas.getContext("2d")
-			if (!noiseContext) {
-				throw new Error("Failed to create canvas context for noise")
-			}
-
-			// Create image data to fill with noise
-			const noiseImageData = noiseContext?.createImageData(
-				noiseCanvas.width,
-				noiseCanvas.height
-			)
-			if (!noiseImageData) {
-				throw new Error("Failed to create image data for noise")
-			}
-			const noiseData = noiseImageData?.data
-			if (!noiseData) {
-				throw new Error("Failed to create image data for noise")
-			}
-
-			// Loop through each pixel and add a slight random offset to the base color
-			for (let y = 0; y < noiseCanvas.height; y++) {
-				for (let x = 0; x < noiseCanvas.width; x++) {
-					const index = (y * noiseCanvas.width + x) * 4
-					// Generate a noise value between -15 and 15 for subtle variation
-					const noiseVal = Math.random() * 4 - 10
-
-					// Apply the noise to each channel
-					let r = baseColor.r + 2 * noiseVal
-					let g = baseColor.g + noiseVal
-					let b = baseColor.b + noiseVal
-
-					// Clamp the values to valid [0, 255] range
-					r = Math.min(255, Math.max(0, r))
-					g = Math.min(255, Math.max(0, g))
-					b = Math.min(255, Math.max(0, b))
-
-					// Compute the grayscale value using the luminosity method
-					const gray = r * 0.299 + g * 0.587 + b * 0.114
-					const darkGray = gray * darkenFactor
-					// Blend the original color with the grayscale based on the desaturation factor
-					r = r * (1 - desaturationFactor) + darkGray * desaturationFactor
-					g = g * (1 - desaturationFactor) + darkGray * desaturationFactor
-					b = b * (1 - desaturationFactor) + darkGray * desaturationFactor
-
-					// Final clamp just in case
-					noiseData[index] = Math.min(255, Math.max(0, r))
-					noiseData[index + 1] = Math.min(255, Math.max(0, g))
-					noiseData[index + 2] = Math.min(255, Math.max(0, b))
-					noiseData[index + 3] = 255 // Fully opaque
-				}
-			}
-
-			// Draw the generated noise data onto the canvas
-			noiseContext.putImageData(noiseImageData, 0, 0)
-
-			// Create a texture from the canvas
-			const noiseTexture = new THREE.CanvasTexture(noiseCanvas)
-			// Set the texture to repeat so it covers the entire plane
-			noiseTexture.wrapS = THREE.RepeatWrapping
-			noiseTexture.wrapT = THREE.RepeatWrapping
-			noiseTexture.repeat.set(
-				groundPlaneSize / noiseCanvas.width,
-				groundPlaneSize / noiseCanvas.height
-			)
-
-			// Optionally, use NearestFilter to keep the blocky noise effect
-			noiseTexture.minFilter = THREE.NearestFilter
-			noiseTexture.magFilter = THREE.NearestFilter
-
-			// Create your plane geometry and material using the noise texture
-			const planeGeometry = new THREE.PlaneGeometry(
-				groundPlaneSize,
-				groundPlaneSize
-			)
-			const planeMaterial = new THREE.MeshLambertMaterial({
-				map: noiseTexture,
-				side: THREE.DoubleSide,
-			})
-
-			// Create the mesh, rotate it to lay flat, and add to the scene
-			this.groundPlane = new THREE.Mesh(planeGeometry, planeMaterial)
-			this.groundPlane.rotation.x = -Math.PI / 2
-			this.groundPlane.receiveShadow = true
-			this.scene.add(this.groundPlane)
-		}
+		this.groundPlane = createGround()
+		this.scene.add(this.groundPlane)
 
 		this.selectionBox = new SelectionBox(this.camera, this.scene)
 		this.helper = new SelectionHelper(this.renderer, "selectBox")
 		this.selectedUnits = []
 		this.selectableObjects = []
 		// Grid
-		const totalSize = groundPlaneSize
+		const totalSize = GROUND_PLANE_SIZE
 		const cellSize = 1
 		const divisions = totalSize / cellSize
 		this.grid = new THREE.GridHelper(totalSize, divisions)
@@ -246,45 +138,12 @@ export class Scene {
 
 		// TODO: Scene Init
 
-		this.setupLights()
+		this.scene.add(...createLights())
 
 		window.addEventListener("resize", this.onWindowResize.bind(this))
 		this.container.addEventListener("mousedown", this.onMouseDown.bind(this))
 		this.container.addEventListener("mousemove", this.onMouseMove.bind(this))
 		this.container.addEventListener("mouseup", this.onMouseUp.bind(this))
-	}
-
-	/* Add all lights to the scene */
-	setupLights() {
-		const lights = [
-			new THREE.AmbientLight(0xffffff, 0),
-			new THREE.DirectionalLight(0xffffff, 3),
-			new THREE.DirectionalLight(0xffffff, 0.5),
-			new THREE.DirectionalLight(0xffffff, 0.2),
-		]
-
-		const d = 200
-		lights[1].position.set(1 * d, 1 * d, -1 * d)
-		lights[2].position.set(1 * d, 1 * d, 0)
-		lights[3].position.set(0, 1 * d, 1 * d)
-
-		lights.forEach((light) => {
-			if (light instanceof THREE.DirectionalLight) {
-				light.castShadow = true
-				light.shadow.mapSize.width = 2048 * 3
-				light.shadow.mapSize.height = 2048 * 3
-
-				light.shadow.camera.left = -d
-				light.shadow.camera.right = d
-				light.shadow.camera.top = d
-				light.shadow.camera.bottom = -d
-				light.shadow.camera.near = 0.1
-				light.shadow.camera.far = 500
-				light.shadow.camera.updateProjectionMatrix()
-			}
-		})
-
-		this.scene.add(...lights)
 	}
 
 	onWindowResize() {
