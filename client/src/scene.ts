@@ -41,6 +41,9 @@ export class Scene {
 	selectedUnits: any[] = []
 	selectableObjects: any[] = []
 	grid: THREE.GridHelper
+	// Reference to the engine Game, captured each syncFromEngine. Its spatial
+	// grid is the source of truth for tile occupancy / placement collision.
+	private game: Game | null = null
 	TEMP_house: Building
 	TEMP_townhall: Building
 	TEMP_barracks: Building
@@ -250,24 +253,6 @@ export class Scene {
 		}
 	}
 
-	addCube(x: number, y: number, z: number, l: number) {
-		const geometry = new THREE.BoxGeometry(l, l, l)
-		const material = new THREE.MeshLambertMaterial({ color: 0x00ff00 })
-		const cube = new THREE.Mesh(geometry, material)
-		cube.position.set(x, y, z)
-		cube.castShadow = true
-		cube.receiveShadow = true
-		const edges = new THREE.EdgesGeometry(cube.geometry)
-		const lineMaterial = new THREE.LineBasicMaterial({
-			color: 0x000000,
-			linewidth: 5,
-		})
-		const outline = new THREE.LineSegments(edges, lineMaterial)
-		cube.add(outline)
-		this.cubes.push(cube)
-		this.scene.add(cube)
-	}
-
 	// TODO: Update type of unit type
 	addUnit(
 		id: number,
@@ -317,15 +302,6 @@ export class Scene {
 		unit.model.position.set(x, unit.height / 2, z)
 	}
 
-	/** All rendered building/resource-node views (excludes the build previews). */
-	private buildingViews(): Building[] {
-		const result: Building[] = []
-		for (const entity of this.entities.values()) {
-			if (entity instanceof Building) result.push(entity)
-		}
-		return result
-	}
-
 	removeUnit(id: number) {
 		const entity = this.entities.get(id)
 		if (!entity) return
@@ -354,6 +330,7 @@ export class Scene {
 	 * Creates new objects for new entities, removes dead ones, updates positions.
 	 */
 	syncFromEngine(game: Game): void {
+		this.game = game
 		// Sync all players' entities
 		for (const [pid, player] of game.players) {
 			// Fighters (knights)
@@ -475,38 +452,17 @@ export class Scene {
 		width: number,
 		height: number
 	) {
-		var collide = false
-		const buildingPositions: THREE.Vector3[] = []
-		this.buildingViews().forEach((building) => {
-			const buildingPos = building.gridPosition
-			for (var x = 0; x < building.width; x++) {
-				for (var z = 0; z < building.height; z++) {
-					const posX = buildingPos.x + x
-					const posZ = buildingPos.z + z
-					const loc = new THREE.Vector3(posX, buildingPos.y, posZ)
-					buildingPositions.push(loc)
-				}
-			}
-		})
-
+		// Query the engine's spatial grid over the footprint instead of
+		// rebuilding an occupancy list from the rendered views every frame.
+		if (!this.game) return false
 		for (var x = 0; x < width; x++) {
 			for (var z = 0; z < height; z++) {
-				const posX = gridLocation.x + x
-				const posZ = gridLocation.z + z
-
-				buildingPositions.forEach((buildingPosition) => {
-					if (
-						Math.abs(posX - buildingPosition.x) < 0.01 &&
-						Math.abs(posZ - buildingPosition.z) < 0.01
-					) {
-						collide = true
-						return
-					}
-				})
+				const tx = Math.floor(gridLocation.x + x)
+				const tz = Math.floor(gridLocation.z + z)
+				if (this.game.tileBlocked(tx, tz)) return true
 			}
 		}
-
-		return collide
+		return false
 	}
 
 	getMouseCoordinatesOnGroundPlane(mouseX: number, mouseY: number) {

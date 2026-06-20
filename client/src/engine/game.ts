@@ -4,18 +4,22 @@ import {
     Player, Fighter, Builder, Building, Resource,
     Command, BuildingType,
     AGGRO_RADIUS, BUILDER_CARRYING_CAPACITY, BUILDER_REACH, BUILDER_MINE_SPEED,
-    BUILDING_COSTS, Cost,
+    BUILDING_COSTS, BUILDING_FOOTPRINT, Cost,
 } from "./types";
 import {
     updateMovable, createFighter, createBuilder, createBuilding, createResource,
     resourceTotal, buildingPosition, setHealth,
 } from "./entities";
+import { SpatialGrid, toTile } from "./grid";
 
 export class Game {
     elapsedTime = 0;
     deceased: EntityID[] = [];
     players: Map<PlayerID, Player> = new Map();
     resources: Map<EntityID, Resource> = new Map();
+    // Derived spatial index over all entities; kept in sync with the per-player
+    // Maps + resources below (which remain the source of truth). See grid.ts.
+    grid: SpatialGrid = new SpatialGrid();
     private entityIDs: Set<EntityID> = new Set();
     private nextEntityCounter = 0;
 
@@ -54,6 +58,8 @@ export class Game {
 
         const buildings = new Map<EntityID, Building>();
         buildings.set(townHallId, townHall);
+        const thFootprint = BUILDING_FOOTPRINT["townhall"];
+        this.grid.insertArea(townHallId, townHallLoc.x, townHallLoc.z, thFootprint.width, thFootprint.height);
 
         const player: Player = {
             id,
@@ -98,6 +104,7 @@ export class Game {
             } else {
                 this.resources.set(id, createResource(id, "wood", { x, z }));
             }
+            this.grid.insert(id, x, z);
         }
     }
 
@@ -110,6 +117,7 @@ export class Game {
             // Update fighters
             for (const [, fighter] of player.fighters) {
                 updateMovable(fighter, dt);
+                this.grid.move(fighter.id, fighter.position.x, fighter.position.z);
                 if (fighter.targetEntityId !== -1) {
                     this.huntDown(fighter, dt);
                 } else {
@@ -123,6 +131,7 @@ export class Game {
             // Update builders
             for (const [, builder] of player.builders) {
                 updateMovable(builder, dt);
+                this.grid.move(builder.id, builder.position.x, builder.position.z);
                 this.updateBuilder(builder, player, dt);
             }
 
@@ -191,58 +200,54 @@ export class Game {
     }
 
     private getNearestResource(position: Vec3): [Resource | null, Vec3] {
-        let minDistance = Infinity;
-        let nearest: Resource | null = null;
-        let nearestPos = new Vec3();
-
-        for (const [, resource] of this.resources) {
-            if (resourceTotal(resource) <= 0) continue;
-            const rPos = Vec3.fromGrid(resource.position.x, resource.position.z);
-            const dist = rPos.distanceTo(position);
-            if (dist < minDistance) {
-                minDistance = dist;
-                nearest = resource;
-                nearestPos = rPos;
-            }
-        }
-        return [nearest, nearestPos];
+        const id = this.grid.queryNearest(position.x, position.z, (eid) => {
+            const resource = this.resources.get(eid);
+            if (!resource || resourceTotal(resource) <= 0) return null;
+            return resource.position;
+        });
+        if (id < 0) return [null, new Vec3()];
+        const resource = this.resources.get(id)!;
+        return [resource, Vec3.fromGrid(resource.position.x, resource.position.z)];
     }
 
     // --- Combat ---
 
     private getClosestEnemy(fighter: Fighter, playerId: PlayerID): EntityID {
+        // Grid narrows candidates spatially; the per-player Maps answer whose
+        // team an entity is on. Sorting candidates by id makes equal-distance
+        // tie-breaks deterministic across clients.
+        const candidates = this.grid.queryRadius(fighter.position.x, fighter.position.z, AGGRO_RADIUS);
+        candidates.sort((a, b) => a - b);
+
         let closest: EntityID = -1;
         let closestDist = Infinity;
 
-        for (const [pid, player] of this.players) {
-            if (pid === playerId) continue;
-
-            for (const [, enemy] of player.fighters) {
-                const dist = enemy.position.distanceTo(fighter.position);
-                if (dist > AGGRO_RADIUS) continue;
-                if (closest < 0 || dist < closestDist) {
-                    closest = enemy.id;
-                    closestDist = dist;
-                }
-            }
-            for (const [, enemy] of player.builders) {
-                const dist = enemy.position.distanceTo(fighter.position);
-                if (dist > AGGRO_RADIUS) continue;
-                if (closest < 0 || dist < closestDist) {
-                    closest = enemy.id;
-                    closestDist = dist;
-                }
-            }
-            for (const [, enemy] of player.buildings) {
-                const dist = buildingPosition(enemy).distanceTo(fighter.position);
-                if (dist > AGGRO_RADIUS) continue;
-                if (closest < 0 || dist < closestDist) {
-                    closest = enemy.id;
-                    closestDist = dist;
-                }
+        for (const id of candidates) {
+            const enemy = this.findOwnedEntity(id);
+            if (!enemy || enemy.owner === playerId) continue;
+            const dist = enemy.position.distanceTo(fighter.position);
+            if (dist > AGGRO_RADIUS) continue; // box query overshoots the circle at corners
+            if (closest < 0 || dist < closestDist) {
+                closest = id;
+                closestDist = dist;
             }
         }
         return closest;
+    }
+
+    // Resolves a candidate id to its owning player and world position, or null
+    // if it isn't a player-owned entity (e.g. a resource node, which is never a
+    // combat target).
+    private findOwnedEntity(id: EntityID): { owner: PlayerID; position: Vec3 } | null {
+        for (const [pid, player] of this.players) {
+            const fighter = player.fighters.get(id);
+            if (fighter) return { owner: pid, position: fighter.position };
+            const builder = player.builders.get(id);
+            if (builder) return { owner: pid, position: builder.position };
+            const building = player.buildings.get(id);
+            if (building) return { owner: pid, position: buildingPosition(building) };
+        }
+        return null;
     }
 
     private getKillable(id: EntityID): { getHealth(): number; setHealth(h: number): void; getPosition(): Vec3 } | null {
@@ -337,6 +342,7 @@ export class Game {
 
     private deleteEntity(id: EntityID): void {
         this.entityIDs.delete(id);
+        this.grid.remove(id);
         for (const [, player] of this.players) {
             player.fighters.delete(id);
             player.builders.delete(id);
@@ -399,6 +405,10 @@ export class Game {
         const cost = BUILDING_COSTS[type];
         if (!this.canAfford(player, cost)) return null;
 
+        // Reject placement if any tile in the building's footprint is occupied.
+        const footprint = BUILDING_FOOTPRINT[type];
+        if (this.areaBlocked(pos.x, pos.z, footprint.width, footprint.height)) return null;
+
         player.gold -= cost.gold;
         player.stone -= cost.stone;
         player.wood -= cost.wood;
@@ -406,7 +416,33 @@ export class Game {
         const id = this.newEntityID();
         const building = createBuilding(id, type, pos, cost);
         player.buildings.set(id, building);
+        this.grid.insertArea(id, pos.x, pos.z, footprint.width, footprint.height);
         return building;
+    }
+
+    // True if any tile in the [origin, origin+size) footprint is occupied.
+    private areaBlocked(originX: number, originZ: number, width: number, height: number): boolean {
+        const origin = toTile(originX, originZ);
+        for (let dx = 0; dx < width; dx++) {
+            for (let dz = 0; dz < height; dz++) {
+                if (this.tileBlocked(origin.tx + dx, origin.tz + dz)) return true;
+            }
+        }
+        return false;
+    }
+
+    // True if any entity occupies the tile. The single grid-backed predicate
+    // for building placement, shared by both the engine (placeBuilding) and the
+    // renderer's build-preview collision check so they can never disagree.
+    tileBlocked(tx: number, tz: number): boolean {
+        const cell = this.grid.at(tx, tz);
+        if (!cell) return false;
+        if (cell.size > 0) {
+            console.log("cell", cell)
+            return true;
+        }
+
+        return false;
     }
 
     private spawnKnight(playerId: PlayerID): Fighter | null {
@@ -432,6 +468,7 @@ export class Game {
         const id = this.newEntityID();
         const fighter = createFighter(id, buildingPosition(barracks));
         player.fighters.set(id, fighter);
+        this.grid.insert(id, fighter.position.x, fighter.position.z);
         return fighter;
     }
 
@@ -450,6 +487,7 @@ export class Game {
         const id = this.newEntityID();
         const builder = createBuilder(id, buildingPosition(townHall));
         player.builders.set(id, builder);
+        this.grid.insert(id, builder.position.x, builder.position.z);
         return builder;
     }
 

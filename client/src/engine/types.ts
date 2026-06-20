@@ -45,6 +45,20 @@ export const BUILDING_MAX_COOLDOWN: Record<BuildingType, number> = {
     barracks: 10,
 };
 
+export interface Footprint {
+    width: number;
+    height: number;
+}
+
+// Tile footprint each building occupies, anchored at its `position` and
+// extending toward +x/+z. Source of truth for occupancy/collision; the
+// renderer's Building view mirrors these dimensions. Resources are 1x1.
+export const BUILDING_FOOTPRINT: Record<BuildingType, Footprint> = {
+    house:    { width: 2, height: 2 },
+    townhall: { width: 4, height: 4 },
+    barracks: { width: 4, height: 4 },
+};
+
 // --- Entity interfaces ---
 
 export interface Fighter {
