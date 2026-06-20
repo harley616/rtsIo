@@ -18,11 +18,10 @@ type UnitType = "knight" | "builder"
 
 export class Scene {
 	keysPressed: Record<string, boolean> = {}
-	buildings: Building[] = []
 	playerId: number
 	moveType: number = 0
-	builderIds: Record<string, any> = {}
-	unitsMap: Record<string, Unit | Building> = {}
+	/** Single source of truth for every entity currently rendered, keyed by engine entity ID. */
+	entities: Map<number, Unit | Building> = new Map()
 	isBuilding: boolean = false
 	canBuild: boolean = false
 	currentBuildingType: string | false = false
@@ -47,11 +46,8 @@ export class Scene {
 	cubes: THREE.Mesh[] = []
 	constructor(containerId: string, models: any, sendCommand: (cmd: Command) => void) {
 		this.keysPressed = {}
-		this.buildings = []
 		this.playerId = -1
 		this.moveType = 0
-		this.builderIds = {}
-		this.unitsMap = {}
 		this.isBuilding = false
 		this.canBuild = false
 		this.currentBuildingType = false
@@ -449,7 +445,7 @@ export class Scene {
 				})
 			}
 
-			this.unitsMap[id] = unit
+			this.entities.set(id, unit)
 			this.scene.add(unit.mesh)
 		} else {
 			console.error(`Failed to create unit of type: ${type}`)
@@ -457,23 +453,32 @@ export class Scene {
 	}
 
 	moveUnit(id: number, x: number, z: number) {
-		const unit = this.unitsMap[id]
+		const unit = this.entities.get(id)
+		if (!unit) return
 		unit.model.position.set(x, unit.height / 2, z)
 	}
 
-	removeUnit(id: number) {
-		const unit = this.unitsMap[id]
+	/** All rendered building/resource-node views (excludes the build previews). */
+	private buildingViews(): Building[] {
+		const result: Building[] = []
+		for (const entity of this.entities.values()) {
+			if (entity instanceof Building) result.push(entity)
+		}
+		return result
+	}
 
-		const building = this.buildings.find((b) => b.id === id)
-		if (building) {
-			this.buildings = this.buildings.filter((b) => b.id !== id)
-			this.scene.remove(building.model)
+	removeUnit(id: number) {
+		const entity = this.entities.get(id)
+		if (!entity) return
+
+		if (entity instanceof Building) {
+			this.scene.remove(entity.model)
 		} else {
 			// Remove child meshes from selectableObjects
 			this.selectableObjects = this.selectableObjects.filter(
 				(mesh: any) => !mesh.unit || mesh.unit.entityId !== id
 			)
-			this.scene.remove(unit.model)
+			this.scene.remove(entity.model)
 			this.renderer.renderLists.dispose()
 		}
 
@@ -482,27 +487,20 @@ export class Scene {
 			(u: any) => u.entityId !== id
 		)
 
-		delete this.unitsMap[id]
+		this.entities.delete(id)
 	}
-
-	/** Track which engine entity IDs are currently rendered */
-	private renderedEntities: Set<number> = new Set()
 
 	/**
 	 * Sync engine game state to Three.js scene.
 	 * Creates new objects for new entities, removes dead ones, updates positions.
 	 */
 	syncFromEngine(game: Game): void {
-		const currentIds = new Set<number>()
-
 		// Sync all players' entities
 		for (const [pid, player] of game.players) {
 			// Fighters (knights)
 			for (const [id, fighter] of player.fighters) {
-				currentIds.add(id)
-				if (!this.renderedEntities.has(id)) {
+				if (!this.entities.has(id)) {
 					this.addUnit(id, pid, "knight", fighter.position.x, fighter.position.y, fighter.position.z)
-					this.renderedEntities.add(id)
 				} else {
 					this.moveUnit(id, fighter.position.x, fighter.position.z)
 				}
@@ -510,10 +508,8 @@ export class Scene {
 
 			// Builders (workers)
 			for (const [id, builder] of player.builders) {
-				currentIds.add(id)
-				if (!this.renderedEntities.has(id)) {
+				if (!this.entities.has(id)) {
 					this.addUnit(id, pid, "builder", builder.position.x, builder.position.y, builder.position.z)
-					this.renderedEntities.add(id)
 				} else {
 					this.moveUnit(id, builder.position.x, builder.position.z)
 				}
@@ -521,29 +517,22 @@ export class Scene {
 
 			// Buildings
 			for (const [id, building] of player.buildings) {
-				currentIds.add(id)
-				if (!this.renderedEntities.has(id)) {
+				if (!this.entities.has(id)) {
 					this.createBuilding(id, pid, building.buildingType as BuildingType, building.position.x, building.position.z)
-					this.renderedEntities.add(id)
 				}
 			}
 		}
 
 		// Resources
 		for (const [id, resource] of game.resources) {
-			currentIds.add(id)
-			if (!this.renderedEntities.has(id)) {
+			if (!this.entities.has(id)) {
 				this.createResourceNode(id, resource.resourceType as BuildingType, resource.position.x, resource.position.z, resource.gold, resource.stone, resource.wood)
-				this.renderedEntities.add(id)
 			}
 		}
 
 		// Remove deceased entities
 		for (const id of game.deceased) {
-			if (this.renderedEntities.has(id)) {
-				this.removeUnit(id)
-				this.renderedEntities.delete(id)
-			}
+			this.removeUnit(id)
 		}
 	}
 
@@ -597,8 +586,7 @@ export class Scene {
 			this.scene,
 			this.modelsDict
 		)
-		this.buildings.push(newBuilding)
-		this.unitsMap[id] = newBuilding
+		this.entities.set(id, newBuilding)
 	}
 	createResourceNode(
 		id: number,
@@ -620,8 +608,7 @@ export class Scene {
 			this.modelsDict,
 			[gold, stone, wood]
 		)
-		this.buildings.push(newBuilding)
-		this.unitsMap[id] = newBuilding
+		this.entities.set(id, newBuilding)
 	}
 
 	checkGridCollisions(
@@ -631,7 +618,7 @@ export class Scene {
 	) {
 		var collide = false
 		const buildingPositions: THREE.Vector3[] = []
-		this.buildings.forEach((building) => {
+		this.buildingViews().forEach((building) => {
 			const buildingPos = building.gridPosition
 			for (var x = 0; x < building.width; x++) {
 				for (var z = 0; z < building.height; z++) {
