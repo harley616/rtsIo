@@ -7,7 +7,7 @@ import {
     BUILDING_COSTS, BUILDING_FOOTPRINT, Cost,
 } from "./types";
 import {
-    updateMovable, createFighter, createBuilder, createBuilding, createResource,
+    updateMovable, setMovableGoal, createFighter, createBuilder, createBuilding, createResource,
     resourceTotal, buildingPosition, setHealth,
     buildingSpawnPosition,
 } from "./entities";
@@ -105,7 +105,7 @@ export class Game {
             } else {
                 this.resources.set(id, createResource(id, "wood", { x, z }));
             }
-            this.grid.insert(id, x, z);
+            this.grid.insertStatic(id, x, z);
         }
     }
 
@@ -150,14 +150,24 @@ export class Game {
     // --- Builder AI ---
 
     private updateBuilder(builder: Builder, player: Player, dt: number): void {
+        // Obeying a player move order: leave the goal alone until we arrive, then
+        // hand control back to the auto-gather loop (resumes next tick).
+        if (builder.manualMove) {
+            if (builder.goalPosition.distanceTo(builder.position) < BUILDER_REACH) {
+                builder.manualMove = false;
+            }
+            return;
+        }
+
         const carrying = builder.gold + builder.wood + builder.stone;
 
         if (carrying >= BUILDER_CARRYING_CAPACITY) {
             // Go to townhall to deposit
             const townHall = player.buildings.get(player.primaryTownHall);
             if (!townHall) return;
+            builder.resourceTarget = null;
             const thPos = buildingPosition(townHall);
-            builder.goalPosition = thPos;
+            setMovableGoal(builder, thPos, this.grid);
 
             if (thPos.distanceTo(builder.position) < BUILDER_REACH) {
                 player.gold += builder.gold;
@@ -168,12 +178,21 @@ export class Game {
                 builder.wood = 0;
             }
         } else {
-            // Find nearest resource and mine
-            const [resource, targetPos] = this.getNearestResource(builder.position);
-            if (!resource) return;
+            // Keep mining the current resource until it's gone; only then look
+            // for the nearest one (avoids re-searching and target flip-flop every tick).
+            let resource = builder.resourceTarget !== null ? this.resources.get(builder.resourceTarget) : undefined;
+            if (!resource || resourceTotal(resource) <= 0) {
+                const [nearest] = this.getNearestResource(builder.position);
+                if (!nearest) {
+                    builder.resourceTarget = null;
+                    return;
+                }
+                resource = nearest;
+                builder.resourceTarget = nearest.id;
+            }
 
-            builder.resourceTarget = resource.id;
-            builder.goalPosition = targetPos;
+            const targetPos = Vec3.fromGrid(resource.position.x, resource.position.z);
+            setMovableGoal(builder, targetPos, this.grid);
 
             if (targetPos.distanceTo(builder.position) < BUILDER_REACH) {
                 const available = resource.gold + resource.stone + resource.wood;
@@ -295,7 +314,7 @@ export class Game {
                 }
             }
         } else {
-            fighter.goalPosition = target.getPosition().subtract(new Vec3(0.5, 0.5, 0.5));
+            setMovableGoal(fighter, target.getPosition().subtract(new Vec3(0.5, 0.5, 0.5)), this.grid);
         }
         fighter.timeTillNextAttack -= dt;
     }
@@ -362,7 +381,7 @@ export class Game {
             case "moveUnit": {
                 const movable = this.getMovable(command.entityId);
                 if (!movable) return;
-                movable.goalPosition = new Vec3(command.pos.x, command.pos.y, command.pos.z);
+                setMovableGoal(movable, new Vec3(command.pos.x, command.pos.y, command.pos.z), this.grid);
                 if (command.moveType === "aggressive") {
                     movable.aggro = true;
                 } else {
@@ -371,6 +390,11 @@ export class Game {
                 // Clear target when given a new move order
                 if ("targetEntityId" in movable) {
                     (movable as Fighter).targetEntityId = -1;
+                }
+                // Builders: suspend auto-gather until the commanded point is reached.
+                if (movable.unitType === "builder") {
+                    movable.resourceTarget = null;
+                    movable.manualMove = true;
                 }
                 break;
             }

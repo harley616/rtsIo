@@ -40,6 +40,12 @@ export class SpatialGrid {
     // reverse index: entity -> every tile key it occupies (one for units, the
     // full footprint for multi-tile structures), so move/remove are O(footprint).
     private entityCells: Map<EntityID, TileKey[]> = new Map();
+    // Tiles blocked by STATIC obstacles (buildings, resources) — the layer A*
+    // routes around. Distinct from cell occupancy, which also counts units:
+    // pathing must ignore movers (they steer locally) and only avoid structures.
+    // Mutated only on create/destroy (rare), queried by has() (order-free), so
+    // it stays lockstep-deterministic.
+    private staticBlocked: Set<TileKey> = new Set();
 
     // Single-tile insert for point entities (units, 1x1 resources).
     insert(id: EntityID, x: number, z: number): void {
@@ -54,6 +60,18 @@ export class SpatialGrid {
         this.entityCells.set(id, [key]);
     }
 
+    // Single-tile insert for a STATIC point obstacle (resources). Same as
+    // insert() but also marks the tile impassable for pathfinding. Such entities
+    // are not expected to move(); they leave via remove().
+    insertStatic(id: EntityID, x: number, z: number): void {
+        if (this.entityCells.has(id)) this.remove(id);
+        const { tx, tz } = toTile(x, z);
+        const key = tileKey(tx, tz);
+        this.addToCell(key, id);
+        this.entityCells.set(id, [key]);
+        this.staticBlocked.add(key);
+    }
+
     // Occupy every tile in the [origin, origin+size) footprint. For static
     // multi-tile structures; such entities are not expected to move().
     insertArea(id: EntityID, originX: number, originZ: number, width: number, height: number): void {
@@ -64,6 +82,7 @@ export class SpatialGrid {
             for (let dz = 0; dz < height; dz++) {
                 const key = tileKey(origin.tx + dx, origin.tz + dz);
                 this.addToCell(key, id);
+                this.staticBlocked.add(key); // structures are static by definition
                 keys.push(key);
             }
         }
@@ -73,7 +92,10 @@ export class SpatialGrid {
     remove(id: EntityID): void {
         const keys = this.entityCells.get(id);
         if (keys === undefined) return;
-        for (const key of keys) this.removeFromCell(key, id);
+        for (const key of keys) {
+            this.removeFromCell(key, id);
+            this.staticBlocked.delete(key); // no-op for movers, which are never static
+        }
         this.entityCells.delete(id);
     }
 
@@ -101,6 +123,13 @@ export class SpatialGrid {
     isOccupied(tx: number, tz: number): boolean {
         const cell = this.cells.get(tileKey(tx, tz));
         return cell !== undefined && cell.size > 0;
+    }
+
+    // True if a static obstacle (building/resource) blocks this tile. This is
+    // the passability test for A* — see pathfinding.ts. Unlike isOccupied it
+    // ignores movers, so a route stays valid as units walk over tiles.
+    isStaticBlocked(tx: number, tz: number): boolean {
+        return this.staticBlocked.has(tileKey(tx, tz));
     }
 
     // All entity IDs in tiles overlapping the [x±r, z±r] box. The caller does

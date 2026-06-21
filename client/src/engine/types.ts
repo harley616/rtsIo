@@ -73,6 +73,13 @@ export interface Entity {
 export interface Movable extends Entity {
     goalPosition: Vec3;
     speed: number;
+    // Precomputed waypoint route to goalPosition, around static obstacles
+    // (see pathfinding.ts). Consumed front-to-back by updateMovable; empty
+    // means "steer straight at the goal". Final waypoint is the exact goal.
+    path: Vec3[];
+    // Tile key the current `path` was computed for. Lets setMovableGoal skip
+    // recomputing A* when the goal tile hasn't changed (NaN = force recompute).
+    pathGoalKey: number;
 }
 
 
@@ -99,6 +106,10 @@ export interface Builder extends Movable {
     health: number;
     maxHealth: number;
     resourceTarget: EntityID | null; // ID of targeted resource, null if none
+    // True while obeying a player move order: the auto-gather AI is suspended
+    // (won't reassign goalPosition) until the builder reaches the commanded
+    // point, then it flips back to false and gathering resumes.
+    manualMove: boolean;
 }
 
 export interface Building extends Entity {
