@@ -105,7 +105,7 @@ export function updateMovable(entity: Movable, dt: number, grid: SpatialGrid): v
         // is the goal tile we mean to walk onto, so never sidestep off it.
         const destTile = toTile(destPos.x, destPos.z);
         const destIsGoalTile = destTile.tx === goalTile.tx && destTile.tz === goalTile.tz;
-        if (!grid.isStaticBlocked(destTile.tx, destTile.tz) && tileHasOtherUnit(grid, destTile.tx, destTile.tz, entity.id)) {
+        if (!grid.isStaticBlocked(destTile.tx, destTile.tz) && !(entity.unitType === 'builder') && tileHasOtherUnit(grid, destTile.tx, destTile.tz, entity.id)) {
             if (destIsGoalTile) break; // blocker is ON our destination: halt, don't orbit it
             const sidestep = findClosestUnoccupiedPosition(entity, grid).subtract(entity.position);
             if (sidestep.length() > 0) {
