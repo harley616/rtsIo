@@ -9,6 +9,7 @@ import {
 import {
     updateMovable, createFighter, createBuilder, createBuilding, createResource,
     resourceTotal, buildingPosition, setHealth,
+    buildingSpawnPosition,
 } from "./entities";
 import { SpatialGrid, toTile } from "./grid";
 
@@ -116,7 +117,7 @@ export class Game {
         for (const [pid, player] of this.players) {
             // Update fighters
             for (const [, fighter] of player.fighters) {
-                updateMovable(fighter, dt);
+                updateMovable(fighter, dt, this.grid);
                 this.grid.move(fighter.id, fighter.position.x, fighter.position.z);
                 if (fighter.targetEntityId !== -1) {
                     this.huntDown(fighter, dt);
@@ -130,7 +131,7 @@ export class Game {
 
             // Update builders
             for (const [, builder] of player.builders) {
-                updateMovable(builder, dt);
+                updateMovable(builder, dt, this.grid);
                 this.grid.move(builder.id, builder.position.x, builder.position.z);
                 this.updateBuilder(builder, player, dt);
             }
@@ -466,7 +467,7 @@ export class Game {
         barracks.cooldown = barracks.maxCooldown;
 
         const id = this.newEntityID();
-        const fighter = createFighter(id, buildingPosition(barracks));
+        const fighter = createFighter(id, buildingSpawnPosition(barracks));
         player.fighters.set(id, fighter);
         this.grid.insert(id, fighter.position.x, fighter.position.z);
         return fighter;
@@ -485,7 +486,7 @@ export class Game {
         player.gold -= cost.gold;
 
         const id = this.newEntityID();
-        const builder = createBuilder(id, buildingPosition(townHall));
+        const builder = createBuilder(id, buildingSpawnPosition(townHall));
         player.builders.set(id, builder);
         this.grid.insert(id, builder.position.x, builder.position.z);
         return builder;

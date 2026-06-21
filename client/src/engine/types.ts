@@ -11,7 +11,6 @@ export interface GridLocation {
 // --- Constants ---
 
 export const AGGRO_RADIUS = 10;
-export const BUILDER_SPEED = 1;
 export const BUILDER_MAX_HEALTH = 100;
 export const BUILDER_CARRYING_CAPACITY = 20;
 export const BUILDER_REACH = 0.5;
@@ -28,9 +27,9 @@ export type ResourceType = "gold" | "stone" | "wood";
 export type UnitType = "knight" | "builder";
 
 export const BUILDING_COSTS: Record<BuildingType, Cost> = {
-    house:    { gold: 100, stone: 0,   wood: 50  },
+    house: { gold: 100, stone: 0, wood: 50 },
     townhall: { gold: 500, stone: 400, wood: 200 },
-    barracks: { gold: 100, stone: 100, wood: 50  },
+    barracks: { gold: 100, stone: 100, wood: 50 },
 };
 
 export const BUILDING_HEALTH: Record<BuildingType, number> = {
@@ -54,22 +53,36 @@ export interface Footprint {
 // extending toward +x/+z. Source of truth for occupancy/collision; the
 // renderer's Building view mirrors these dimensions. Resources are 1x1.
 export const BUILDING_FOOTPRINT: Record<BuildingType, Footprint> = {
-    house:    { width: 2, height: 2 },
+    house: { width: 2, height: 2 },
     townhall: { width: 4, height: 4 },
     barracks: { width: 4, height: 4 },
 };
 
+export const RESOURCE_FOOTPRINT: Record<ResourceType, Footprint> = {
+    gold: { width: 1, height: 1 },
+    stone: { width: 1, height: 1 },
+    wood: { width: 1, height: 1 },
+};
+
+export interface Entity {
+    id: EntityID;
+    position: Vec3;
+}
+
+
+export interface Movable extends Entity {
+    goalPosition: Vec3;
+    speed: number;
+}
+
+
 // --- Entity interfaces ---
 
-export interface Fighter {
-    id: EntityID;
+export interface Fighter extends Movable {
     unitType: "knight";
-    position: Vec3;
-    goalPosition: Vec3;
     targetEntityId: EntityID; // -1 if none
     aggro: boolean;
     strength: number;
-    speed: number;
     timeTillNextAttack: number;
     areaOfAttack: number;
     attackDelay: number;
@@ -77,11 +90,8 @@ export interface Fighter {
     health: number;
 }
 
-export interface Builder {
-    id: EntityID;
+export interface Builder extends Movable {
     unitType: "builder";
-    position: Vec3;
-    goalPosition: Vec3;
     gold: number;
     stone: number;
     wood: number;
@@ -91,10 +101,8 @@ export interface Builder {
     resourceTarget: EntityID | null; // ID of targeted resource, null if none
 }
 
-export interface Building {
-    id: EntityID;
+export interface Building extends Entity {
     buildingType: BuildingType;
-    position: GridLocation;
     cost: Cost;
     maxHealth: number;
     health: number;
@@ -103,10 +111,8 @@ export interface Building {
     maxCooldown: number;
 }
 
-export interface Resource {
-    id: EntityID;
+export interface Resource extends Entity {
     resourceType: ResourceType;
-    position: GridLocation;
     gold: number;
     stone: number;
     wood: number;

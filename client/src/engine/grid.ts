@@ -120,6 +120,20 @@ export class SpatialGrid {
         return out;
     }
 
+    findUnnocupiedTiles(originX: number, originZ: number, r: number): { x: number; z: number }[] {
+        const min = toTile(originX - r, originZ - r);
+        const max = toTile(originX + r, originZ + r);
+        const tiles = [];
+        for (let tx = min.tx; tx <= max.tx; tx++) {
+            for (let tz = min.tz; tz <= max.tz; tz++) {
+                if (!this.isOccupied(tx, tz)) {
+                    tiles.push({ x: tx * TILE_SIZE + TILE_SIZE / 2, z: tz * TILE_SIZE + TILE_SIZE / 2 });
+                }
+            }
+        }
+        return tiles;
+    }
+
     // Unbounded nearest. `resolve` returns an entity's true position, or null to
     // reject it (wrong kind, depleted, etc.). The grid only narrows candidates;
     // exact distances come from the resolved positions, so this works for

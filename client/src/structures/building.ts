@@ -1,5 +1,6 @@
 import * as THREE from "three"
 import { BuildingType, ModelsDict } from "../types/models"
+import { BUILDING_FOOTPRINT, RESOURCE_FOOTPRINT } from "../engine/types"
 
 export class Building {
 	type: BuildingType
@@ -66,42 +67,42 @@ export class Building {
 			case "house":
 				this.model = this.modelsDict.house![this.pId - 1].clone()
 				this.offset = new THREE.Vector3(0, 0, 0)
-				this.width = 2
-				this.height = 2
+				this.width = BUILDING_FOOTPRINT.house.width
+				this.height = BUILDING_FOOTPRINT.house.height
 				break
 			case "townhall":
 				this.model = this.modelsDict.townhall![this.pId - 1].clone()
 				this.offset = new THREE.Vector3(1, 0, 1)
-				this.width = 4
-				this.height = 4
+				this.width = BUILDING_FOOTPRINT.townhall.width
+				this.height = BUILDING_FOOTPRINT.townhall.height
 				break
 			case "barracks":
 				this.model = this.modelsDict.barracks![this.pId - 1].clone()
 				this.offset = new THREE.Vector3(1, 0, 1)
 				this.model.rotation.z = Math.PI / 2
-				this.width = 4
-				this.height = 4
+				this.width = BUILDING_FOOTPRINT.barracks.width
+				this.height = BUILDING_FOOTPRINT.barracks.height
 				break
 			case "gold":
 				this.model = this.modelsDict.gold!.clone()
 				this.offset = new THREE.Vector3(-0.5, 0, -0.5)
 				this.model.rotation.z = -Math.PI
-				this.width = 1
-				this.height = 1
+				this.width = RESOURCE_FOOTPRINT.gold.width
+				this.height = RESOURCE_FOOTPRINT.gold.height
 				break
 			case "stone":
 				this.model = this.modelsDict.stone!.clone()
 				this.offset = new THREE.Vector3(-0.5, 0, -0.5)
 				this.model.rotation.z = Math.PI
-				this.width = 1
-				this.height = 1
+				this.width = RESOURCE_FOOTPRINT.stone.width
+				this.height = RESOURCE_FOOTPRINT.stone.height
 				break
 			case "wood":
 				this.model = this.modelsDict.wood!.clone()
 				this.offset = new THREE.Vector3(-0.5, 0, -0.5)
 				this.model.rotation.z = Math.PI / 2
-				this.width = 1
-				this.height = 1
+				this.width = RESOURCE_FOOTPRINT.wood.width
+				this.height = RESOURCE_FOOTPRINT.wood.height
 				break
 		}
 
@@ -116,7 +117,7 @@ export class Building {
 		this.health = 100
 	}
 
-	async loadModel(type: BuildingType): Promise<void> {}
+	async loadModel(type: BuildingType): Promise<void> { }
 
 	moveTo(position: THREE.Vector3): void {
 		this.gridPosition = position
@@ -142,7 +143,7 @@ export class Building {
 	setVisible(visible: boolean): void {
 		this.model.traverse((child: THREE.Object3D) => {
 			if ((child as any).isMesh) {
-				;(child as THREE.Mesh).visible = visible
+				; (child as THREE.Mesh).visible = visible
 			}
 		})
 	}
@@ -157,7 +158,7 @@ export class Building {
 				mesh.castShadow = false
 				mesh.receiveShadow = false
 				if (!Array.isArray(mesh.material)) {
-					;(mesh.material as THREE.MeshStandardMaterial).color = color
+					; (mesh.material as THREE.MeshStandardMaterial).color = color
 					mesh.material.opacity = 0.2
 				}
 			}
@@ -174,7 +175,7 @@ export class Building {
 				mesh.castShadow = false
 				mesh.receiveShadow = false
 				if (!Array.isArray(mesh.material)) {
-					;(mesh.material as THREE.MeshStandardMaterial).color = color
+					; (mesh.material as THREE.MeshStandardMaterial).color = color
 					mesh.material.opacity = 0.4
 				}
 			}
