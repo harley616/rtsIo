@@ -160,7 +160,6 @@ export function createBuilder(id: EntityID, position: Vec3): Builder {
 }
 
 export function createBuilding(id: EntityID, buildingType: BuildingType, position: GridLocation, cost: Cost): Building {
-    console.log(`Creating building ${id} of type ${buildingType} at position (${position.x}, ${position.z}) with cost: gold=${cost.gold}, stone=${cost.stone}, wood=${cost.wood}`);
     return {
         id,
         buildingType,

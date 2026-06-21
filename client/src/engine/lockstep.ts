@@ -15,8 +15,8 @@ export interface LockstepCallbacks {
 }
 
 export class LockstepManager {
+    game: Game | null = null;
     private ws: WebSocket | null = null;
-    private game: Game | null = null;
     private localCommands: Command[] = [];
     private currentTurn = 0;
     private state: LockstepState = "connecting";

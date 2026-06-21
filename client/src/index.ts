@@ -57,6 +57,13 @@ async function InitScene() {
 						case "playing":
 							statusElem.innerHTML = `Player <span id="player-number">${myPlayerId}</span>`
 							scene.playerId = myPlayerId
+							const game = lockstep.getGame()
+							if (game) {
+								const playerTownHall = game.players.get(myPlayerId)?.buildings.get(game.players.get(myPlayerId)?.primaryTownHall ?? -1)
+								scene.camera.position.set((playerTownHall?.position.x ?? 0) + 50, 50, (playerTownHall?.position.z ?? 0) + 50)
+								scene.camera.lookAt(playerTownHall?.position.x ?? 0, 0, playerTownHall?.position.z ?? 0)
+							}
+
 							break
 						case "disconnected":
 							statusElem.textContent = "Disconnected"
