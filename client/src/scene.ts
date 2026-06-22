@@ -17,6 +17,10 @@ interface Unit {
 
 type UnitType = "knight" | "builder"
 
+// Map-editor tools. Resource types place a 1x1 node; spawn1/spawn2 place a
+// player's starting townhall (4x4); erase removes whatever is under the cursor.
+export type EditTool = "gold" | "stone" | "wood" | "spawn1" | "spawn2" | "erase"
+
 export class Scene {
 	keysPressed: Record<string, boolean> = {}
 	playerId: number
@@ -47,7 +51,17 @@ export class Scene {
 	TEMP_house: Building
 	TEMP_townhall: Building
 	TEMP_barracks: Building
+	TEMP_gold: Building
+	TEMP_stone: Building
+	TEMP_wood: Building
 	cubes: THREE.Mesh[] = []
+	// --- Map editor mode ---
+	// When true, the normal select/move/build-command flow is bypassed: the
+	// active tool is previewed under the cursor and clicks are forwarded to
+	// onEditPlace instead of issuing game commands. Driven by editor/editor.ts.
+	editMode: boolean = false
+	editTool: EditTool = "gold"
+	onEditPlace?: (tx: number, tz: number, button: number) => void
 	constructor(containerId: string, models: any, sendCommand: (cmd: Command) => void) {
 		this.keysPressed = {}
 		this.playerId = -1
@@ -139,6 +153,14 @@ export class Scene {
 		)
 		this.TEMP_barracks.setVisible(false)
 
+		// Resource-node placement previews for the map editor.
+		this.TEMP_gold = new Building("gold", -1, 1, 0, 0, 0, this.scene, this.modelsDict)
+		this.TEMP_gold.setVisible(false)
+		this.TEMP_stone = new Building("stone", -1, 1, 0, 0, 0, this.scene, this.modelsDict)
+		this.TEMP_stone.setVisible(false)
+		this.TEMP_wood = new Building("wood", -1, 1, 0, 0, 0, this.scene, this.modelsDict)
+		this.TEMP_wood.setVisible(false)
+
 		// TODO: Scene Init
 
 		this.scene.add(...createLights())
@@ -156,6 +178,17 @@ export class Scene {
 	}
 
 	onMouseDown(e: MouseEvent) {
+		// In editor mode, route clicks to the placement hook and skip the
+		// in-game select/move/build flow entirely.
+		if (this.editMode) {
+			const ground = this.getMouseCoordinatesOnGroundPlane(this.mouseX, this.mouseY)
+			if (ground) {
+				const tile = this.getGridCoordinates(ground)
+				this.onEditPlace?.(tile.x, tile.z, e.button)
+			}
+			return
+		}
+
 		this.handleClick(e.button, this.mouseX, this.mouseY)
 		const mX = (e.clientX / window.innerWidth) * 2 - 1
 		const mY = -(e.clientY / window.innerHeight) * 2 + 1
@@ -548,6 +581,12 @@ export class Scene {
 
 	animate() {
 		this.updateCamera()
+		if (this.editMode) {
+			this.grid.visible = true
+			this.updateEditPreview()
+			this.renderer.render(this.scene, this.camera)
+			return
+		}
 		this.grid.visible = this.isBuilding
 		if (this.isBuilding) {
 			const groundMousePos = this.getMouseCoordinatesOnGroundPlane(
@@ -587,5 +626,45 @@ export class Scene {
 			this.canBuild = false
 		}
 		this.renderer.render(this.scene, this.camera)
+	}
+
+	// Editor: preview the active tool under the cursor with collision tinting.
+	// Spawns reuse the townhall preview; resource tools use their node preview;
+	// erase shows nothing (the click just removes whatever is under it).
+	private editPreviews(): Building[] {
+		return [this.TEMP_gold, this.TEMP_stone, this.TEMP_wood, this.TEMP_townhall]
+	}
+
+	private updateEditPreview() {
+		for (const p of this.editPreviews()) p.setVisible(false)
+
+		let preview: Building | null = null
+		switch (this.editTool) {
+			case "gold": preview = this.TEMP_gold; break
+			case "stone": preview = this.TEMP_stone; break
+			case "wood": preview = this.TEMP_wood; break
+			case "spawn1":
+			case "spawn2": preview = this.TEMP_townhall; break
+			case "erase": preview = null; break
+		}
+		if (!preview) return
+
+		const groundMousePos = this.getMouseCoordinatesOnGroundPlane(this.mouseX, this.mouseY)
+		if (!groundMousePos) return
+
+		preview.setVisible(true)
+		const gridMousePos = this.getGridCoordinates(groundMousePos)
+		preview.moveTo(gridMousePos)
+		const collision = this.checkGridCollisions(gridMousePos, preview.width, preview.height)
+		if (collision) preview.setAppearance_CantBuild()
+		else preview.setAppearance_CanBuild()
+	}
+
+	// Editor: tear down every rendered entity so the scene can be rebuilt from a
+	// fresh Game after a map edit (syncFromEngine only adds/removes-deceased).
+	resetEntities() {
+		for (const id of Array.from(this.entities.keys())) {
+			this.removeUnit(id)
+		}
 	}
 }

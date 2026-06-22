@@ -2,7 +2,7 @@ import { Vec3 } from "./vec3";
 import {
     EntityID, PlayerID, GridLocation,
     Player, Fighter, Builder, Building, Resource,
-    Command, BuildingType,
+    Command, BuildingType, ResourceType,
     AGGRO_RADIUS, BUILDER_CARRYING_CAPACITY, BUILDER_REACH, BUILDER_MINE_SPEED,
     BUILDING_COSTS, BUILDING_FOOTPRINT, Cost,
 } from "./types";
@@ -12,6 +12,7 @@ import {
     buildingSpawnPosition,
 } from "./entities";
 import { SpatialGrid, toTile } from "./grid";
+import { MapDefinition, generateRandomMap } from "./map";
 
 export class Game {
     elapsedTime = 0;
@@ -39,15 +40,19 @@ export class Game {
     // --- Initialization ---
 
     static makeTwoPlayerGame(seed?: number): Game {
+        return Game.fromMap(generateRandomMap(seed ?? 42));
+    }
+
+    // Build a game from an explicit map definition. Entities are created in a
+    // fixed order — players in spawn order, then resources in array order — so
+    // identical map data yields identical entity IDs on every client (the
+    // determinism the lockstep path will rely on).
+    static fromMap(map: MapDefinition): Game {
         const game = new Game();
-
-        // Create players with townhalls
-        game.createPlayer(1, { x: 0, z: 0 });
-        game.createPlayer(2, { x: 30, z: -30 });
-
-        // Add resources (deterministic with seeded RNG)
-        game.addResources(100, seed ?? 42);
-
+        map.spawns.forEach((loc, i) => game.createPlayer(i + 1, loc));
+        for (const r of map.resources) {
+            game.addResourceNode(r.type, r.x, r.z, r.amount);
+        }
         return game;
     }
 
@@ -75,38 +80,12 @@ export class Game {
         this.players.set(id, player);
     }
 
-    addResources(n: number, seed: number): void {
-        // Simple seeded PRNG for determinism
-        let s = seed;
-        const rand = () => {
-            s = (s * 1664525 + 1013904223) & 0x7fffffff;
-            return s / 0x7fffffff;
-        };
-
-        const takenTiles = new Set<string>();
-        const minX = -100, maxX = 100;
-        const minZ = -100, maxZ = 100;
-
-        for (let i = 0; i < n; i++) {
-            let x: number, z: number, key: string;
-            do {
-                x = Math.floor(rand() * (maxX - minX)) + minX;
-                z = Math.floor(rand() * (maxZ - minZ)) + minZ;
-                key = `${x},${z}`;
-            } while (takenTiles.has(key));
-            takenTiles.add(key);
-
-            const roll = rand();
-            const id = this.newEntityID();
-            if (roll < 0.3) {
-                this.resources.set(id, createResource(id, "gold", { x, z }));
-            } else if (roll < 0.6) {
-                this.resources.set(id, createResource(id, "stone", { x, z }));
-            } else {
-                this.resources.set(id, createResource(id, "wood", { x, z }));
-            }
-            this.grid.insertStatic(id, x, z);
-        }
+    // Place a single resource node and index it in the spatial grid. The atomic
+    // building block both fromMap and any future in-game spawning go through.
+    addResourceNode(type: ResourceType, x: number, z: number, amount?: number): void {
+        const id = this.newEntityID();
+        this.resources.set(id, createResource(id, type, { x, z }, amount));
+        this.grid.insertStatic(id, x, z);
     }
 
     // --- Main update loop ---

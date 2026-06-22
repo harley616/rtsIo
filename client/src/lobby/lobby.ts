@@ -1,18 +1,42 @@
 import {
     NetOp, decodeMessage, encodeCreate, encodeJoin,
 } from "../../../shared/protocol";
+import { listMaps } from "../editor/storage";
 
 const RELAY_URL = (import.meta.env.DEV ? "ws://localhost:3001/" : "wss://rts.waterthegarden.com/relay/");
 
 const createBtn = document.getElementById("create-game") as HTMLButtonElement;
 const joinBtn = document.getElementById("join-game") as HTMLButtonElement;
 const offlineBtn = document.getElementById("play-offline") as HTMLButtonElement;
+const editorBtn = document.getElementById("open-editor") as HTMLButtonElement;
+const offlineMapSelect = document.getElementById("offline-map") as HTMLSelectElement;
 const joinCodeInput = document.getElementById("join-code") as HTMLInputElement;
 const codeDisplay = document.getElementById("game-code-display")!;
 const statusMessage = document.getElementById("status-message")!;
 
+// Offline map picker: "Random" plus any user-built maps in local storage.
+function populateOfflineMaps(): void {
+    offlineMapSelect.innerHTML = "";
+    const randomOpt = document.createElement("option");
+    randomOpt.value = "";
+    randomOpt.textContent = "Random map";
+    offlineMapSelect.appendChild(randomOpt);
+    for (const name of listMaps()) {
+        const opt = document.createElement("option");
+        opt.value = name;
+        opt.textContent = name;
+        offlineMapSelect.appendChild(opt);
+    }
+}
+populateOfflineMaps();
+
 offlineBtn.addEventListener("click", () => {
-    window.location.href = "/play/";
+    const mapName = offlineMapSelect.value;
+    window.location.href = mapName ? `/play/?map=${encodeURIComponent(mapName)}` : "/play/";
+});
+
+editorBtn.addEventListener("click", () => {
+    window.location.href = "/editor/";
 });
 
 createBtn.addEventListener("click", () => {

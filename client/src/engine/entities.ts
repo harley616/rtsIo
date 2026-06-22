@@ -104,13 +104,8 @@ export function updateMovable(entity: Movable, dt: number, grid: SpatialGrid): v
         // obstacles are already handled by the path; a static-blocked dest tile
         // is the goal tile we mean to walk onto, so never sidestep off it.
         const destTile = toTile(destPos.x, destPos.z);
-        const destIsGoalTile = destTile.tx === goalTile.tx && destTile.tz === goalTile.tz;
         if (!grid.isStaticBlocked(destTile.tx, destTile.tz) && !(entity.unitType === 'builder') && tileHasOtherUnit(grid, destTile.tx, destTile.tz, entity.id)) {
-            if (destIsGoalTile) break; // blocker is ON our destination: halt, don't orbit it
-            const sidestep = findClosestUnoccupiedPosition(entity, grid).subtract(entity.position);
-            if (sidestep.length() > 0) {
-                destPos = entity.position.add(sidestep.normalize().scale(distanceToMove));
-            }
+            return
         }
         entity.position = destPos;
         break;
@@ -173,11 +168,11 @@ export function createBuilding(id: EntityID, buildingType: BuildingType, positio
     };
 }
 
-export function createResource(id: EntityID, resourceType: ResourceType, position: GridLocation): Resource {
+export function createResource(id: EntityID, resourceType: ResourceType, position: GridLocation, amount?: number): Resource {
+    // Per-type defaults; `amount` (when given by a map definition) overrides them.
+    const total = amount ?? (resourceType === "wood" ? 100 : 300);
     const amounts = { gold: 0, stone: 0, wood: 0 };
-    if (resourceType === "gold") amounts.gold = 300;
-    else if (resourceType === "stone") amounts.stone = 300;
-    else amounts.wood = 100;
+    amounts[resourceType] = total;
 
     return {
         id,
