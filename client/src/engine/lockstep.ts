@@ -4,7 +4,7 @@ import {
     decodeMessage, encodeCreate, encodeJoin, encodeReconnect, encodeCommandsMsg, encodeAck, encodeLoaded,
 } from "../../../shared/protocol";
 
-const DT = 0.05;
+const DT = parseFloat(import.meta.env.VITE_DT);
 
 export type LockstepState = "connecting" | "waiting" | "playing" | "disconnected";
 
@@ -23,6 +23,7 @@ export class LockstepManager {
     private callbacks: LockstepCallbacks;
     private pendingTurns: { turn: number; p1Commands: Command[]; p2Commands: Command[] }[] = [];
     private tickTimer: ReturnType<typeof setInterval> | null = null;
+    private inFlightTurn: Promise<void> | null = null;
 
     playerId = -1;
     seed = 0;
@@ -126,7 +127,11 @@ export class LockstepManager {
                     p2Commands: msg.p2Commands,
                 });
                 this.ws?.send(encodeAck(this.game ? this.game.elapsedTime : 0));
-                this.tick();
+                if (this.inFlightTurn) {
+                    this.inFlightTurn = this.inFlightTurn.then(() => this.tick());
+                } else {
+                    this.tick();
+                }
                 break;
 
             case NetOp.PlayerDisconnected:
@@ -145,12 +150,14 @@ export class LockstepManager {
         this.localCommands = [];
     }
 
-    private tick(): void {
-        if (this.pendingTurns.length > 0) {
+    private async tick(): Promise<void> {
+        if (this.pendingTurns.length > 0 && this.game) {
             const turnData = this.pendingTurns.shift()!;
+            await this.game.updateAsync(DT);
             this.applyTurn(turnData);
+            this.submitTurn();
+            this.inFlightTurn = this.game.updateAsync(DT);
         }
-        this.submitTurn();
     }
 
     private applyTurn(turnData: { turn: number; p1Commands: Command[]; p2Commands: Command[] }): void {
@@ -163,7 +170,6 @@ export class LockstepManager {
             this.game.applyCommand(2, cmd);
         }
 
-        this.game.update(DT);
 
         this.currentTurn++;
         this.callbacks.onTurnApplied(this.game);

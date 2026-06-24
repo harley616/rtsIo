@@ -5,9 +5,11 @@ import { LockstepManager } from "./engine/lockstep"
 import { loadModels } from "./loadModels"
 import { loadMap } from "./editor/storage"
 
-const TICK_MS = 10
-const DT = 0.05
-const RELAY_URL = import.meta.env.DEV ? "ws://localhost:3001/" : "wss://rts.waterthegarden.com/relay/"
+const TICK_MS = parseInt(import.meta.env.VITE_TICK_MS)
+const DT = parseFloat(import.meta.env.VITE_DT)
+const RELAY_URL = import.meta.env.VITE_RELAY_URL
+
+let tick = 0
 
 InitScene()
 
@@ -111,14 +113,20 @@ async function InitScene() {
 			scene.camera.lookAt(startTownHall.position.x, 0, startTownHall.position.z)
 		}
 
-		setInterval(() => {
-			while (pendingCommands.length > 0) {
-				game.applyCommand(scene.playerId, pendingCommands.shift()!)
+		setInterval(async () => {
+			if (tick % 2 === 0) {
+				game.update(DT)
+				while (pendingCommands.length > 0) {
+					game.applyCommand(scene.playerId, pendingCommands.shift()!)
+				}
+				scene.syncFromEngine(game)
+				updateResourceDisplay(game, scene.playerId)
 			}
-			game.update(DT)
-			scene.syncFromEngine(game)
-			updateResourceDisplay(game, scene.playerId)
-		}, TICK_MS)
+			else {
+				game.update(DT)
+			}
+			tick++
+		}, 5)
 	}
 
 	// --- UI Button handlers ---

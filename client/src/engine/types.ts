@@ -80,6 +80,7 @@ export interface Movable extends Entity {
     // Tile key the current `path` was computed for. Lets setMovableGoal skip
     // recomputing A* when the goal tile hasn't changed (NaN = force recompute).
     pathGoalKey: number;
+    unitType: UnitType
 }
 
 

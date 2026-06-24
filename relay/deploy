@@ -14,13 +14,13 @@ if [ $? -eq 0 ]; then
     # -v: verbose (shows progress)
     # -z: compress (speeds up transfer)
     # --delete: removes files on server that no longer exist locally
-    rsync -avz --delete ./package.json ./package-lock.json ./$BUILD_FOLDER/ $SERVER:$DEST_FOLDER
+    rsync -avz  ./package.json ./package-lock.json ./$BUILD_FOLDER/ $SERVER:$DEST_FOLDER
+
+    # Restart the server (adjust the command as needed)
+    ssh -t $SERVER "sudo systemctl restart rts-io-relay.service"
     
     echo "🎉 Deployment complete!"
 else
     echo "❌ Build failed. Deployment aborted."
     exit 1
 fi
-
-
-

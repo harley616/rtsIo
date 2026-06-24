@@ -89,41 +89,48 @@ export class Game {
     }
 
     // --- Main update loop ---
-
+    //
     update(dt: number): void {
-        this.elapsedTime += dt;
+        for (let i = 0; i < 5; i++) {
+            this.elapsedTime += dt;
 
-        for (const [pid, player] of this.players) {
-            // Update fighters
-            for (const [, fighter] of player.fighters) {
-                updateMovable(fighter, dt, this.grid);
-                this.grid.move(fighter.id, fighter.position.x, fighter.position.z);
-                if (fighter.targetEntityId !== -1) {
-                    this.huntDown(fighter, dt);
-                } else {
-                    const atGoal = fighter.position.subtract(fighter.goalPosition).length() === 0;
-                    if (atGoal || fighter.aggro) {
-                        this.generalAttack(fighter, pid, dt);
+            for (const [pid, player] of this.players) {
+                // Update fighters
+                for (const [, fighter] of player.fighters) {
+                    updateMovable(fighter, dt, this.grid);
+                    this.grid.move(fighter.id, fighter.position.x, fighter.position.z);
+                    if (fighter.targetEntityId !== -1) {
+                        this.huntDown(fighter, dt);
+                    } else {
+                        const atGoal = fighter.position.subtract(fighter.goalPosition).length() === 0;
+                        if (atGoal || fighter.aggro) {
+                            this.generalAttack(fighter, pid, dt);
+                        }
+                    }
+                }
+
+                // Update builders
+                for (const [, builder] of player.builders) {
+                    updateMovable(builder, dt, this.grid);
+                    this.grid.move(builder.id, builder.position.x, builder.position.z);
+                    this.updateBuilder(builder, player, dt);
+                }
+
+                // Decrement building cooldowns
+                for (const [, building] of player.buildings) {
+                    if (building.cooldown > 0) {
+                        building.cooldown -= dt;
                     }
                 }
             }
 
-            // Update builders
-            for (const [, builder] of player.builders) {
-                updateMovable(builder, dt, this.grid);
-                this.grid.move(builder.id, builder.position.x, builder.position.z);
-                this.updateBuilder(builder, player, dt);
-            }
-
-            // Decrement building cooldowns
-            for (const [, building] of player.buildings) {
-                if (building.cooldown > 0) {
-                    building.cooldown -= dt;
-                }
-            }
+            this.collectDeceased();
         }
+    }
 
-        this.collectDeceased();
+    async updateAsync(dt: number): Promise<void> {
+        this.update(dt);
+        await new Promise((resolve) => setTimeout(resolve, 5));
     }
 
     // --- Builder AI ---

@@ -3,7 +3,7 @@ import {
 } from "../../../shared/protocol";
 import { listMaps } from "../editor/storage";
 
-const RELAY_URL = (import.meta.env.DEV ? "ws://localhost:3001/" : "wss://rts.waterthegarden.com/relay/");
+const RELAY_URL = import.meta.env.VITE_RELAY_URL;
 
 const createBtn = document.getElementById("create-game") as HTMLButtonElement;
 const joinBtn = document.getElementById("join-game") as HTMLButtonElement;

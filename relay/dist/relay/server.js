@@ -1,7 +1,7 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { decodeMessage, encodeCreated, encodeJoined, encodeReconnected, encodeStart, encodeTurn, encodeError, encodePlayerDisconnected, } from "../shared/protocol.js";
 const PORT = 3001;
-const TURN_DURATION_MS = 10;
+const TURN_DURATION_MS = 5;
 const RECONNECT_GRACE_MS = 5000;
 const games = new Map();
 function generateCode() {

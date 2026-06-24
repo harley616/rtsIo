@@ -20,25 +20,6 @@ function tileHasOtherUnit(grid: SpatialGrid, tx: number, tz: number, self: Entit
     return cell !== undefined && Array.from(cell).some((id) => id !== self);
 }
 
-function findClosestUnoccupiedPosition(entity: Movable, grid: SpatialGrid): Vec3 {
-    const candidates = grid.findUnnocupiedTiles(entity.position.x, entity.position.z, 1);
-    if (candidates.length === 0) {
-        return entity.position.clone(); // No unoccupied tiles found, stay in place
-    }
-    let closest = candidates[0];
-    let closestDist = entity.goalPosition.distanceTo(Vec3.fromGrid(closest.x, closest.z));
-    for (const candidate of candidates) {
-        const candidatePos = Vec3.fromGrid(candidate.x, candidate.z);
-        const dist = entity.goalPosition.distanceTo(candidatePos);
-        if (dist < closestDist) {
-            closest = candidate;
-            closestDist = dist;
-        }
-    }
-    return Vec3.fromGrid(closest.x, closest.z);
-}
-
-
 // Assign a movement goal and compute the static-obstacle route to it. Idempotent
 // on the destination tile, so the AI can re-issue the same goal every tick
 // without recomputing A*. Route around all static obstacles except the goal tile
